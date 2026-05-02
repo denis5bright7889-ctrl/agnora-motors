@@ -1,5 +1,9 @@
-import { auth } from "@/auth";
+import NextAuth from "next-auth";
+import { authConfig } from "./auth.config";
 import { NextResponse } from "next/server";
+
+// Use the Edge-compatible config only — no Node.js modules imported here.
+const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -17,13 +21,14 @@ export default auth((req) => {
   }
 
   // ── Dealer routes ─────────────────────────────────────────
-  if (pathname.startsWith("/dealer/dashboard") ||
-      pathname.startsWith("/dealer/listings")) {
+  if (
+    pathname.startsWith("/dealer/dashboard") ||
+    pathname.startsWith("/dealer/listings")
+  ) {
     if (!session) {
       return NextResponse.redirect(new URL("/login?next=" + pathname, req.url));
     }
     if (role !== "dealer" && role !== "admin") {
-      // Dealer registered but not yet approved → send to pending page
       return NextResponse.redirect(new URL("/dealer/pending", req.url));
     }
   }

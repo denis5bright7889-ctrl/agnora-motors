@@ -1,34 +1,35 @@
 import { NextResponse } from "next/server";
-import { addCar, listCars } from "@/lib/cars-store";
+import { getPublicCars, isDbConfigured } from "@/lib/db";
 
-export async function GET() {
-  return NextResponse.json({ cars: listCars() });
-}
+export const runtime = "nodejs";
 
-export async function POST(request: Request) {
+export async function GET(req: Request) {
+  if (!isDbConfigured()) {
+    return NextResponse.json({ cars: [] });
+  }
+
+  const { searchParams } = new URL(req.url);
+
+  const search = searchParams.get("search") ?? undefined;
+  const condition = searchParams.get("condition") ?? undefined;
+  const transmission = searchParams.get("transmission") ?? undefined;
+  const makes = searchParams.getAll("make").filter(Boolean);
+  const bodies = searchParams.getAll("body").filter(Boolean);
+  const fuels = searchParams.getAll("fuel").filter(Boolean);
+  const locations = searchParams.getAll("location").filter(Boolean);
+  const minPrice = searchParams.get("minPrice") ? Number(searchParams.get("minPrice")) : undefined;
+  const maxPrice = searchParams.get("maxPrice") ? Number(searchParams.get("maxPrice")) : undefined;
+  const financing = searchParams.get("financing") === "true" ? true : undefined;
+  const hirePurchase = searchParams.get("hirePurchase") === "true" ? true : undefined;
+
   try {
-    const body = await request.json();
-    const title = String(body?.title || "").trim();
-    const price = Number(body?.price);
-    const image = String(body?.image || "").trim();
-    const description = typeof body?.description === "string" ? body.description.trim() : "";
-
-    if (!title) {
-      return NextResponse.json({ error: "Title is required." }, { status: 400 });
-    }
-    if (!Number.isFinite(price) || price <= 0) {
-      return NextResponse.json({ error: "Price must be a valid number." }, { status: 400 });
-    }
-
-    const car = addCar({
-      title,
-      price,
-      image,
-      description,
+    const cars = await getPublicCars({
+      search, condition, transmission, makes, bodies, fuels, locations,
+      minPrice, maxPrice, financing, hirePurchase,
     });
-
-    return NextResponse.json({ car }, { status: 201 });
-  } catch {
-    return NextResponse.json({ error: "Invalid request payload." }, { status: 400 });
+    return NextResponse.json({ cars });
+  } catch (err) {
+    console.error("[GET /api/cars]", err);
+    return NextResponse.json({ cars: [], error: "Failed to fetch cars" }, { status: 500 });
   }
 }

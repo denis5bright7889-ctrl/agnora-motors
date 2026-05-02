@@ -1,4 +1,4 @@
-export type Condition = "new" | "used" | "certified";
+export type Condition = "new" | "used" | "certified" | "foreign_used" | "locally_used";
 export type Fuel = "petrol" | "diesel" | "hybrid" | "electric";
 export type Transmission = "auto" | "manual";
 export type BodyType = "suv" | "sedan" | "hatchback" | "pickup" | "coupe" | "wagon" | "van";
@@ -21,6 +21,8 @@ export interface Car {
   images: string[];
   features: string[];
   verified: boolean;
+  financingAvailable?: boolean;
+  hirePurchaseAvailable?: boolean;
   dealer: {
     name: string;
     rating: number;
@@ -53,4 +55,75 @@ export interface Brand {
   slug: string;
   count: number;
   topModel?: string;
+}
+
+export type DealerStatus = "pending" | "approved" | "rejected";
+export type CarStatus = "active" | "sold" | "draft";
+export type UserRole = "admin" | "dealer" | "buyer";
+
+export interface Dealer {
+  id: string;
+  userId: string;
+  businessName: string;
+  businessReg: string;
+  kraPin: string;
+  directorName: string;
+  directorIdUrl: string;
+  businessCertUrl: string;
+  phone: string;
+  location: string;
+  status: DealerStatus;
+  rejectionReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  userName?: string;
+  userEmail?: string;
+}
+
+export interface DealerCar {
+  id: string;
+  dealerId: string;
+  slug: string;
+  year: number;
+  make: string;
+  model: string;
+  trim?: string | null;
+  price: number;
+  mileage: number;
+  fuel: Fuel;
+  transmission: Transmission;
+  bodyType: BodyType;
+  condition: Condition;
+  location: string;
+  description: string;
+  images: string[];
+  features: string[];
+  verified: boolean;
+  financingAvailable?: boolean;
+  hirePurchaseAvailable?: boolean;
+  status: CarStatus;
+  createdAt: string;
+  updatedAt: string;
+  views?: number;
+  inquiries?: number;
+}
+
+export interface User {
+  id: string;
+  name: string | null;
+  email: string;
+  image?: string | null;
+  role: UserRole;
+  createdAt: string;
+}
+
+export interface ContactRequest {
+  id: string;
+  carId: string | null;
+  dealerId: string | null;
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone?: string | null;
+  message: string;
+  createdAt: string;
 }

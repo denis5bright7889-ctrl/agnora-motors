@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { getUserWithHash, createUser, getUserByEmail, isDbConfigured } from "@/lib/db";
 import { findLocalUser } from "@/lib/local-users";
+import { authConfig } from "./auth.config";
 
 declare module "next-auth" {
   interface Session {
@@ -28,11 +29,11 @@ function getEnvAdmin() {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  session: { strategy: "jwt" },
+  ...authConfig,
 
   providers: [
     Google({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+      clientId:     process.env.GOOGLE_CLIENT_ID     ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
     }),
 
@@ -55,25 +56,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (envAdmin && email.toLowerCase() === envAdmin.email.toLowerCase()) {
           const valid = await bcrypt.compare(password, envAdmin.passwordHash);
           if (!valid) return null;
-          return {
-            id:    envAdmin.id,
-            email: envAdmin.email,
-            name:  envAdmin.name,
-            role:  envAdmin.role,
-          };
+          return { id: envAdmin.id, email: envAdmin.email, name: envAdmin.name, role: envAdmin.role };
         }
 
-        // ── 2. File-based local users (no DB required) ───────────
+        // ── 2. File-based local users (no DB required) ────
         const localUser = findLocalUser(email);
         if (localUser) {
           const valid = await bcrypt.compare(password, localUser.passwordHash);
           if (!valid) return null;
-          return {
-            id:    localUser.id,
-            email: localUser.email,
-            name:  localUser.name,
-            role:  localUser.role,
-          };
+          return { id: localUser.id, email: localUser.email, name: localUser.name, role: localUser.role };
         }
 
         // ── 3. Database users ─────────────────────────────
@@ -88,7 +79,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return {
           id:    user.id,
           email: user.email,
-          name:  user.name ?? undefined,
+          name:  user.name  ?? undefined,
           image: user.image ?? undefined,
           role:  user.role,
         };
@@ -97,6 +88,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
 
   callbacks: {
+    ...authConfig.callbacks,
+
     async jwt({ token, user, account }) {
       if (user) {
         token.id   = user.id;
@@ -123,16 +116,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
       return token;
     },
-
-    async session({ session, token }) {
-      session.user.id   = token.id   as string;
-      session.user.role = (token.role as string | undefined) ?? "buyer";
-      return session;
-    },
-  },
-
-  pages: {
-    signIn: "/login",
-    error:  "/login",
   },
 });
