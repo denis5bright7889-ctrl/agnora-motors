@@ -41,6 +41,7 @@ desktop.ini
 # Misc
 .vercel
 .turbo
+tsconfig.tsbuildinfo
 
 # Local dev stores (file-based fallback, dev-only)
 .local-users.json
