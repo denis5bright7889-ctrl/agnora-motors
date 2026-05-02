@@ -41,3 +41,7 @@ desktop.ini
 # Misc
 .vercel
 .turbo
+
+# Local dev stores (file-based fallback, dev-only)
+.local-users.json
+.local-posts.json
