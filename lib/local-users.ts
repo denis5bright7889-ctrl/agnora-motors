@@ -15,7 +15,10 @@ export interface LocalUser {
   createdAt: string;
 }
 
-const FILE = resolve(process.cwd(), ".local-users.json");
+const FILE =
+  process.env.NODE_ENV === "production"
+    ? "/tmp/.local-users.json"
+    : resolve(process.cwd(), ".local-users.json");
 
 function read(): LocalUser[] {
   if (!existsSync(FILE)) return [];

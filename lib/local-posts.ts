@@ -25,7 +25,10 @@ export interface Post {
   createdAt: string;
 }
 
-const FILE = resolve(process.cwd(), ".local-posts.json");
+const FILE =
+  process.env.NODE_ENV === "production"
+    ? "/tmp/.local-posts.json"
+    : resolve(process.cwd(), ".local-posts.json");
 
 function read(): Post[] {
   if (!existsSync(FILE)) return [];
