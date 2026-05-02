@@ -9,8 +9,10 @@ const schema = z.object({ text: z.string().min(1).max(500) });
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  context: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await context.params;
+
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -22,7 +24,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
 
-  const post = addComment(params.id, {
+  const post = addComment(id, {
     userId:    session.user.id,
     userName:  session.user.name ?? "Anonymous",
     userImage: session.user.image ?? undefined,
