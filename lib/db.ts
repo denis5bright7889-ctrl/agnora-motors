@@ -1,29 +1,34 @@
-import { Pool } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 import type { Car, Dealer, DealerCar, User } from "@/types";
 
-let _pool: Pool | null = null;
+// neon() uses HTTP (fetch) transport — works on Node.js 18 and Edge runtimes
+// without needing a WebSocket polyfill. Each call is a stateless HTTP request.
+let _sql: ReturnType<typeof neon> | null = null;
 
-function pool(): Pool {
-  if (!_pool) {
-    if (!process.env.DATABASE_URL) {
-      throw new Error("DATABASE_URL is not set. Add it to .env.local.");
-    }
-    _pool = new Pool({ connectionString: process.env.DATABASE_URL });
+function getSql(): ReturnType<typeof neon> {
+  if (!process.env.DATABASE_URL) {
+    throw new Error(
+      "DATABASE_URL is not configured. " +
+      "Add it to Vercel → Settings → Environment Variables.",
+    );
   }
-  return _pool;
+  if (!_sql) {
+    _sql = neon(process.env.DATABASE_URL);
+  }
+  return _sql;
 }
 
 export async function query<T = Record<string, unknown>>(
-  sql: string,
+  text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const client = await pool().connect();
-  try {
-    const result = await client.query(sql, params);
-    return result.rows as T[];
-  } finally {
-    client.release();
-  }
+  const sql = getSql();
+  // neon() called as sql(text, paramsArray) returns rows directly (T[])
+  const rows = await (sql as unknown as (t: string, p: unknown[]) => Promise<T[]>)(
+    text,
+    params,
+  );
+  return rows;
 }
 
 export function isDbConfigured(): boolean {
@@ -33,8 +38,9 @@ export function isDbConfigured(): boolean {
 // ── Users ──────────────────────────────────────────────────
 
 export async function getUserByEmail(email: string): Promise<User | null> {
-  const rows = await query<User & { password_hash?: string }>(
-    "SELECT id, name, email, image, role, created_at as \"createdAt\" FROM users WHERE email = $1 LIMIT 1",
+  const rows = await query<User>(
+    `SELECT id, name, email, image, role, created_at AS "createdAt"
+     FROM users WHERE email = $1 LIMIT 1`,
     [email],
   );
   return rows[0] ?? null;
@@ -42,7 +48,8 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 
 export async function getUserById(id: string): Promise<User | null> {
   const rows = await query<User>(
-    "SELECT id, name, email, image, role, created_at as \"createdAt\" FROM users WHERE id = $1 LIMIT 1",
+    `SELECT id, name, email, image, role, created_at AS "createdAt"
+     FROM users WHERE id = $1 LIMIT 1`,
     [id],
   );
   return rows[0] ?? null;
@@ -54,7 +61,7 @@ export async function getUserWithHash(
   const rows = await query<User & { passwordHash: string | null }>(
     `SELECT id, name, email, image, role,
             password_hash AS "passwordHash",
-            created_at AS "createdAt"
+            created_at   AS "createdAt"
      FROM users WHERE email = $1 LIMIT 1`,
     [email],
   );
@@ -72,8 +79,15 @@ export async function createUser(data: {
     `INSERT INTO users (email, name, password_hash, role, image)
      VALUES ($1, $2, $3, $4, $5)
      RETURNING id, name, email, image, role, created_at AS "createdAt"`,
-    [data.email, data.name, data.passwordHash ?? null, data.role ?? "buyer", data.image ?? null],
+    [
+      data.email,
+      data.name,
+      data.passwordHash ?? null,
+      data.role ?? "buyer",
+      data.image ?? null,
+    ],
   );
+  if (!rows[0]) throw new Error("User insert returned no rows");
   return rows[0];
 }
 
@@ -179,7 +193,6 @@ export async function updateDealerStatus(
     [status, rejectionReason ?? null, id],
   );
   if (status === "approved") {
-    // Grant dealer role to user
     await query(
       `UPDATE users SET role = 'dealer'
        WHERE id = (SELECT user_id FROM dealers WHERE id = $1)`,
@@ -188,7 +201,7 @@ export async function updateDealerStatus(
   }
 }
 
-// ── Cars (DB-backed dealer listings) ──────────────────────
+// ── Cars ───────────────────────────────────────────────────
 
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -198,9 +211,9 @@ export async function createDealerCar(
   dealerId: string,
   data: Omit<DealerCar, "id" | "dealerId" | "slug" | "createdAt" | "updatedAt" | "views" | "inquiries">,
 ): Promise<DealerCar> {
-  const base = slugify(`${data.year}-${data.make}-${data.model}`);
+  const base   = slugify(`${data.year}-${data.make}-${data.model}`);
   const suffix = Math.random().toString(36).slice(2, 7);
-  const slug = `${base}-${suffix}`;
+  const slug   = `${base}-${suffix}`;
 
   const rows = await query<DealerCar>(
     `INSERT INTO cars
@@ -213,7 +226,7 @@ export async function createDealerCar(
        price, mileage, fuel, transmission,
        body_type AS "bodyType", condition, location, description,
        images, features, verified, status,
-       financing_available AS "financingAvailable",
+       financing_available  AS "financingAvailable",
        hire_purchase_available AS "hirePurchaseAvailable",
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
@@ -221,7 +234,7 @@ export async function createDealerCar(
       data.price, data.mileage, data.fuel, data.transmission, data.bodyType,
       data.condition, data.location, data.description,
       data.images, data.features,
-      data.financingAvailable ?? false,
+      data.financingAvailable  ?? false,
       data.hirePurchaseAvailable ?? false,
     ],
   );
@@ -234,13 +247,13 @@ export async function getDealerCars(dealerId: string): Promise<DealerCar[]> {
             c.trim, c.price, c.mileage, c.fuel, c.transmission,
             c.body_type AS "bodyType", c.condition, c.location, c.description,
             c.images, c.features, c.verified, c.status,
-            c.financing_available AS "financingAvailable",
+            c.financing_available  AS "financingAvailable",
             c.hire_purchase_available AS "hirePurchaseAvailable",
             c.created_at AS "createdAt", c.updated_at AS "updatedAt",
-            COUNT(DISTINCT v.id)::INT AS views,
+            COUNT(DISTINCT v.id)::INT  AS views,
             COUNT(DISTINCT cr.id)::INT AS inquiries
      FROM cars c
-     LEFT JOIN car_views v ON v.car_id = c.id
+     LEFT JOIN car_views       v  ON v.car_id  = c.id
      LEFT JOIN contact_requests cr ON cr.car_id = c.id
      WHERE c.dealer_id = $1
      GROUP BY c.id
@@ -255,7 +268,7 @@ export async function getAllDbCars(): Promise<DealerCar[]> {
             c.model, c.trim, c.price, c.mileage, c.fuel, c.transmission,
             c.body_type AS "bodyType", c.condition, c.location, c.description,
             c.images, c.features, c.verified, c.status,
-            c.financing_available AS "financingAvailable",
+            c.financing_available  AS "financingAvailable",
             c.hire_purchase_available AS "hirePurchaseAvailable",
             c.created_at AS "createdAt", c.updated_at AS "updatedAt",
             COUNT(DISTINCT v.id)::INT AS views
@@ -267,7 +280,6 @@ export async function getAllDbCars(): Promise<DealerCar[]> {
   );
 }
 
-// Returns Car[] (with dealer info) for the public listings page
 export async function getPublicCars(opts: {
   search?: string;
   makes?: string[];
@@ -282,11 +294,13 @@ export async function getPublicCars(opts: {
   hirePurchase?: boolean;
 } = {}): Promise<Car[]> {
   const conditions: string[] = ["c.status = 'active'"];
-  const params: unknown[] = [];
+  const params: unknown[]   = [];
   let idx = 1;
 
   if (opts.search) {
-    conditions.push(`(c.make ILIKE $${idx} OR c.model ILIKE $${idx} OR c.trim ILIKE $${idx})`);
+    conditions.push(
+      `(c.make ILIKE $${idx} OR c.model ILIKE $${idx} OR c.trim ILIKE $${idx})`,
+    );
     params.push(`%${opts.search}%`);
     idx++;
   }
@@ -330,12 +344,8 @@ export async function getPublicCars(opts: {
     params.push(opts.maxPrice);
     idx++;
   }
-  if (opts.financing) {
-    conditions.push(`c.financing_available = TRUE`);
-  }
-  if (opts.hirePurchase) {
-    conditions.push(`c.hire_purchase_available = TRUE`);
-  }
+  if (opts.financing)    conditions.push("c.financing_available = TRUE");
+  if (opts.hirePurchase) conditions.push("c.hire_purchase_available = TRUE");
 
   const where = conditions.join(" AND ");
 
@@ -353,12 +363,12 @@ export async function getPublicCars(opts: {
             c.price, c.mileage, c.fuel, c.transmission,
             c.body_type AS "bodyType", c.condition, c.location,
             c.description, c.images, c.features, c.verified,
-            c.financing_available AS "financingAvailable",
+            c.financing_available  AS "financingAvailable",
             c.hire_purchase_available AS "hirePurchaseAvailable",
             c.created_at AS "createdAt",
             d.business_name AS "dealerName",
-            d.location AS "dealerLocation",
-            d.phone AS "dealerPhone"
+            d.location      AS "dealerLocation",
+            d.phone         AS "dealerPhone"
      FROM cars c
      LEFT JOIN dealers d ON d.id = c.dealer_id
      WHERE ${where}
@@ -367,11 +377,7 @@ export async function getPublicCars(opts: {
   );
 
   return rows.map((r) => ({
-    id: r.id,
-    slug: r.slug,
-    year: r.year,
-    make: r.make,
-    model: r.model,
+    id: r.id, slug: r.slug, year: r.year, make: r.make, model: r.model,
     trim: r.trim ?? undefined,
     price: Number(r.price),
     mileage: r.mileage,
@@ -384,15 +390,15 @@ export async function getPublicCars(opts: {
     images: r.images?.length ? r.images : ["/placeholder-car.jpg"],
     features: r.features ?? [],
     verified: r.verified,
-    financingAvailable: r.financingAvailable,
+    financingAvailable:    r.financingAvailable,
     hirePurchaseAvailable: r.hirePurchaseAvailable,
     createdAt: r.createdAt,
     dealer: {
-      name: r.dealerName ?? "Agnora Dealer",
-      rating: 0,
-      reviews: 0,
+      name:     r.dealerName     ?? "Agnora Dealer",
+      rating:   0,
+      reviews:  0,
       location: r.dealerLocation ?? "",
-      phone: r.dealerPhone ?? "",
+      phone:    r.dealerPhone    ?? "",
     },
   }));
 }
@@ -402,8 +408,8 @@ export async function updateDealerCar(
   dealerId: string,
   data: Partial<DealerCar>,
 ): Promise<void> {
-  const sets: string[] = [];
-  const vals: unknown[] = [];
+  const sets: string[]    = [];
+  const vals: unknown[]   = [];
   let i = 1;
 
   const fieldMap: Record<string, string> = {
@@ -413,7 +419,7 @@ export async function updateDealerCar(
     condition: "condition", location: "location",
     description: "description", images: "images",
     features: "features", status: "status",
-    financingAvailable: "financing_available",
+    financingAvailable:    "financing_available",
     hirePurchaseAvailable: "hire_purchase_available",
   };
 
@@ -425,7 +431,7 @@ export async function updateDealerCar(
   }
 
   if (sets.length === 0) return;
-  sets.push(`updated_at = NOW()`);
+  sets.push("updated_at = NOW()");
   vals.push(id, dealerId);
 
   await query(
@@ -451,12 +457,12 @@ export async function getAdminStats() {
   ]);
 
   return {
-    totalCars: Number(cars[0]?.count ?? 0),
-    totalDealers: Number(dealers[0]?.count ?? 0),
-    totalUsers: Number(users[0]?.count ?? 0),
+    totalCars:     Number(cars[0]?.count     ?? 0),
+    totalDealers:  Number(dealers[0]?.count  ?? 0),
+    totalUsers:    Number(users[0]?.count    ?? 0),
     pendingDealers: Number(pending[0]?.count ?? 0),
-    totalSearches: Number(searches[0]?.count ?? 0),
-    totalContacts: Number(contacts[0]?.count ?? 0),
+    totalSearches:  Number(searches[0]?.count ?? 0),
+    totalContacts:  Number(contacts[0]?.count ?? 0),
   };
 }
 
@@ -499,9 +505,13 @@ export async function recordSearch(data: {
   minPrice?: number; maxPrice?: number; resultsCount?: number;
 }) {
   await query(
-    `INSERT INTO search_events (query, make, model, condition, min_price, max_price, results_count)
+    `INSERT INTO search_events
+       (query, make, model, condition, min_price, max_price, results_count)
      VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-    [data.query ?? null, data.make ?? null, data.model ?? null, data.condition ?? null,
-      data.minPrice ?? null, data.maxPrice ?? null, data.resultsCount ?? null],
+    [
+      data.query ?? null, data.make ?? null, data.model ?? null,
+      data.condition ?? null, data.minPrice ?? null,
+      data.maxPrice ?? null, data.resultsCount ?? null,
+    ],
   );
 }

@@ -52,7 +52,21 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ user: { id: user.id, email: user.email } }, { status: 201 });
   } catch (err) {
-    console.error("Register error:", err);
+    const e = err as { code?: string; message?: string; stack?: string };
+    console.error("[register] error code=%s message=%s", e.code ?? "n/a", e.message ?? String(err));
+    if (e.stack) console.error("[register] stack:", e.stack);
+
+    // 23505 = unique_violation — race-condition duplicate email
+    if (e.code === "23505") {
+      return NextResponse.json({ error: "Email already registered" }, { status: 409 });
+    }
+
+    // 42P01 = undefined_table — schema hasn't been applied yet
+    if (e.code === "42P01") {
+      console.error("[register] The 'users' table does not exist. Run db/schema.sql in the Neon SQL editor.");
+      return NextResponse.json({ error: "Database not initialised" }, { status: 500 });
+    }
+
     return NextResponse.json({ error: "Registration failed" }, { status: 500 });
   }
 }
