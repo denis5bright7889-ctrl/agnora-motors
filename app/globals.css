@@ -59,4 +59,29 @@
   .hover-lift:hover { transform: translateY(-2px); box-shadow: 0 12px 32px -16px rgb(0 0 0 / 0.18); }
   .scroll-rail::-webkit-scrollbar { display: none; }
   .scroll-rail { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* iOS safe-area bottom padding (notch / home indicator) */
+  .pb-safe    { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .mb-safe    { margin-bottom:  env(safe-area-inset-bottom, 0px); }
+
+  /* Smooth snap scroll row used for horizontal car feeds */
+  .snap-row {
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+    padding-bottom: 0.5rem;
+  }
+  .snap-row::-webkit-scrollbar { display: none; }
+  .snap-row > * {
+    scroll-snap-align: start;
+    flex-shrink: 0;
+  }
+
+  /* Touch ripple for interactive elements on mobile */
+  @media (hover: none) {
+    .tap-highlight { -webkit-tap-highlight-color: rgb(var(--accent) / 0.15); }
+  }
 }

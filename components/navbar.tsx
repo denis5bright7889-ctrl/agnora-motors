@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
-import { Menu, X, ChevronDown, LayoutDashboard, ShieldCheck, LogOut, User } from "lucide-react";
+import { Menu, X, ChevronDown, LayoutDashboard, ShieldCheck, LogOut, User, Search } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
@@ -143,7 +143,14 @@ export function Navbar() {
             </Link>
           )}
 
-          {/* Mobile menu button */}
+          {/* Mobile: search shortcut + hamburger */}
+          <Link
+            href="/cars"
+            aria-label="Search cars"
+            className="md:hidden h-10 w-10 inline-flex items-center justify-center rounded-full bg-surface-2 border border-border"
+          >
+            <Search className="h-4 w-4" />
+          </Link>
           <button
             type="button"
             className="md:hidden h-10 w-10 inline-flex items-center justify-center rounded-full bg-surface-2 border border-border"

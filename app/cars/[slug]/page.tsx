@@ -2,7 +2,7 @@
 
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { useState, use } from "react";
+import { useState, use, useRef } from "react";
 import {
   ChevronLeft, Shield, Star, Phone, MessageCircle, Check, AlertTriangle,
   X, Fuel, Settings, MapPin, Calendar, Gauge, ChevronRight, Heart
@@ -25,6 +25,17 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
   const [tab, setTab] = useState<"overview" | "specs" | "inspection">("overview");
   const [contactOpen, setContactOpen] = useState(false);
   const [saved, setSaved] = useState(false);
+  const touchStartX = useRef<number>(0);
+
+  function handleTouchStart(e: React.TouchEvent) {
+    touchStartX.current = e.touches[0].clientX;
+  }
+  function handleTouchEnd(e: React.TouchEvent) {
+    const delta = touchStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(delta) < 50) return;
+    if (delta > 0) setActiveImg((i) => Math.min(car!.images.length - 1, i + 1));
+    else            setActiveImg((i) => Math.max(0, i - 1));
+  }
 
   const conditionLabel: Record<string, string> = { new: "New", used: "Used", certified: "Certified Pre-Owned", foreign_used: "Foreign Used", locally_used: "Locally Used" };
   const conditionText = conditionLabel[car!.condition] ?? car!.condition;
@@ -32,8 +43,9 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
 
   return (
     <>
-      {/* Extra bottom padding on mobile so the sticky CTA doesn't overlap content */}
-      <div className="min-h-screen pb-20 lg:pb-0">
+      {/* pb-28 on mobile = bottom-nav (56px) + contact-CTA (~68px) clearance
+          pb-20 on tablet = contact-CTA only (no bottom nav at md+)           */}
+      <div className="min-h-screen pb-28 md:pb-20 lg:pb-0">
         {/* Breadcrumb */}
         <div className="border-b border-border bg-surface/50">
           <div className="container max-w-container py-3 flex items-center gap-2 text-sm text-muted">
@@ -51,11 +63,15 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
             <div className="space-y-6">
               {/* Gallery */}
               <div className="space-y-3">
-                <div className="relative aspect-[16/10] rounded-3xl overflow-hidden bg-surface-2">
+                <div
+                  className="relative aspect-[16/10] rounded-3xl overflow-hidden bg-surface-2 cursor-grab active:cursor-grabbing"
+                  onTouchStart={handleTouchStart}
+                  onTouchEnd={handleTouchEnd}
+                >
                   <img
                     src={car!.images[activeImg]}
                     alt={`${car!.year} ${car!.make} ${car!.model}`}
-                    className="h-full w-full object-cover"
+                    className="h-full w-full object-cover transition-opacity duration-200"
                   />
                   {car!.verified && (
                     <div className="absolute top-4 left-4 flex items-center gap-1.5 rounded-full bg-accent/90 backdrop-blur-sm px-3 py-1.5 text-white text-xs font-semibold">
@@ -73,13 +89,15 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
                   >
                     <Heart className={cn("h-4 w-4", saved && "fill-current")} />
                   </button>
+
+                  {/* Prev / Next arrows — visible on desktop, hidden on mobile (use swipe) */}
                   {car!.images.length > 1 && (
                     <>
                       <button
                         type="button"
                         aria-label="Previous image"
                         onClick={() => setActiveImg((i) => Math.max(0, i - 1))}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/50 transition-colors disabled:opacity-30"
+                        className="hidden sm:flex absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/30 backdrop-blur-sm items-center justify-center text-white hover:bg-black/50 transition-colors disabled:opacity-30"
                         disabled={activeImg === 0}
                       >
                         <ChevronLeft className="h-4 w-4" />
@@ -88,11 +106,36 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
                         type="button"
                         aria-label="Next image"
                         onClick={() => setActiveImg((i) => Math.min(car!.images.length - 1, i + 1))}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/30 backdrop-blur-sm flex items-center justify-center text-white hover:bg-black/50 transition-colors disabled:opacity-30"
+                        className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-black/30 backdrop-blur-sm items-center justify-center text-white hover:bg-black/50 transition-colors disabled:opacity-30"
                         disabled={activeImg === car!.images.length - 1}
                       >
                         <ChevronRight className="h-4 w-4" />
                       </button>
+
+                      {/* Dot indicators — touch-friendly, always visible */}
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                        {car!.images.map((_, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            aria-label={`View image ${i + 1}`}
+                            onClick={() => setActiveImg(i)}
+                            className={cn(
+                              "rounded-full transition-all duration-200",
+                              i === activeImg
+                                ? "w-5 h-1.5 bg-white"
+                                : "w-1.5 h-1.5 bg-white/50 hover:bg-white/80",
+                            )}
+                          />
+                        ))}
+                      </div>
+
+                      {/* Swipe hint — only shown on mobile, fades out */}
+                      <div className="sm:hidden absolute top-4 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-full bg-black/40 backdrop-blur-sm px-2.5 py-1 text-white text-[10px] pointer-events-none">
+                        <ChevronLeft className="h-3 w-3" />
+                        swipe
+                        <ChevronRight className="h-3 w-3" />
+                      </div>
                     </>
                   )}
                 </div>
@@ -354,8 +397,10 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
         </div>
       </div>
 
-      {/* Sticky mobile price + contact CTA */}
-      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur-md px-4 py-3">
+      {/* Sticky mobile price + contact CTA
+          bottom-14 on mobile = clears the 56-px bottom nav
+          bottom-0 on tablet  = no bottom nav, sit flush at screen bottom  */}
+      <div className="lg:hidden fixed bottom-14 md:bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur-md px-4 py-3">
         <div className="flex items-center gap-3 max-w-container mx-auto">
           <div className="flex-1 min-w-0">
             <p className="font-bold text-lg leading-none">KSh {formatPrice(car!.price)}</p>

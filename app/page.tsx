@@ -102,11 +102,24 @@ export default function HomePage() {
           </div>
 
           {featured.length > 0 ? (
-            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-              {featured.map((car, i) => (
-                <CarCard key={car.id} car={car} priority={i < 3} />
-              ))}
-            </div>
+            <>
+              {/* Mobile: horizontal snap-scroll row */}
+              <div className="snap-row -mx-4 px-4 sm:hidden">
+                {featured.map((car, i) => (
+                  <div key={car.id} className="w-[72vw] min-w-[260px] max-w-[320px]">
+                    <CarCard car={car} priority={i < 2} />
+                  </div>
+                ))}
+                {/* End cap so the last card doesn't hug the edge */}
+                <div className="w-4 shrink-0" aria-hidden />
+              </div>
+              {/* sm+: normal grid */}
+              <div className="hidden sm:grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                {featured.map((car, i) => (
+                  <CarCard key={car.id} car={car} priority={i < 3} />
+                ))}
+              </div>
+            </>
           ) : (
             <p className="text-sm text-muted">No listings yet.</p>
           )}
