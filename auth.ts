@@ -19,7 +19,6 @@ declare module "next-auth" {
   }
 }
 
-// Env-based fallback admin — works without a database
 function getEnvAdmin() {
   const email = process.env.ADMIN_EMAIL;
   const hash  = process.env.ADMIN_PASSWORD_HASH;
@@ -30,6 +29,13 @@ function getEnvAdmin() {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
+
+  // NextAuth v5 reads AUTH_SECRET first, NEXTAUTH_SECRET as fallback.
+  // Explicitly binding both here ensures sessions survive across Vercel invocations
+  // regardless of which env var name is set on the dashboard.
+  secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+
+  debug: process.env.NODE_ENV === "development",
 
   providers: [
     Google({
@@ -47,33 +53,45 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .object({ email: z.string().email(), password: z.string().min(6) })
           .safeParse(credentials);
 
-        if (!parsed.success) return null;
+        if (!parsed.success) {
+          console.log("[authorize] validation failed:", parsed.error.flatten().fieldErrors);
+          return null;
+        }
 
         const { email, password } = parsed.data;
 
-        // ── 1. Env-based admin fallback (no DB required) ──
+        // ── 1. Env-based admin fallback (no DB required) ──────────
         const envAdmin = getEnvAdmin();
         if (envAdmin && email.toLowerCase() === envAdmin.email.toLowerCase()) {
           const valid = await bcrypt.compare(password, envAdmin.passwordHash);
+          console.log("[authorize] env-admin email=%s valid=%s", email, valid);
           if (!valid) return null;
           return { id: envAdmin.id, email: envAdmin.email, name: envAdmin.name, role: envAdmin.role };
         }
 
-        // ── 2. File-based local users (no DB required) ────
+        // ── 2. File-based local users (no DB required) ────────────
         const localUser = findLocalUser(email);
         if (localUser) {
           const valid = await bcrypt.compare(password, localUser.passwordHash);
+          console.log("[authorize] local-user email=%s valid=%s", email, valid);
           if (!valid) return null;
           return { id: localUser.id, email: localUser.email, name: localUser.name, role: localUser.role };
         }
 
-        // ── 3. Database users ─────────────────────────────
-        if (!isDbConfigured()) return null;
+        // ── 3. Database users ─────────────────────────────────────
+        if (!isDbConfigured()) {
+          console.log("[authorize] no DB configured and no local user found for %s", email);
+          return null;
+        }
 
         const user = await getUserWithHash(email);
-        if (!user?.passwordHash) return null;
+        if (!user?.passwordHash) {
+          console.log("[authorize] db: no user or no password hash for %s", email);
+          return null;
+        }
 
         const valid = await bcrypt.compare(password, user.passwordHash);
+        console.log("[authorize] db email=%s valid=%s", email, valid);
         if (!valid) return null;
 
         return {
@@ -88,16 +106,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
 
   callbacks: {
+    // Keep the Edge-safe session callback from authConfig (used by middleware too).
+    // The jwt and session overrides here add logging and Google DB upsert logic.
     ...authConfig.callbacks,
+
+    signIn({ user, account }) {
+      console.log("[signIn] provider=%s email=%s id=%s",
+        account?.provider ?? "credentials",
+        user?.email ?? "unknown",
+        user?.id    ?? "unknown",
+      );
+      return true;
+    },
 
     async jwt({ token, user, account }) {
       if (user) {
+        console.log("[jwt] new sign-in id=%s email=%s role=%s",
+          user.id, user.email, (user as { role?: string }).role ?? "buyer",
+        );
         token.id   = user.id;
-        token.role = user.role ?? "buyer";
+        token.role = (user as { role?: string }).role ?? "buyer";
       }
 
-      // Google sign-in: upsert in DB
+      // Only runs on the initial Google sign-in (account is null on subsequent requests).
       if (account?.provider === "google" && token.email && isDbConfigured()) {
+        console.log("[jwt] google DB upsert for %s", token.email);
         const existing = await getUserByEmail(token.email);
         if (existing) {
           token.id   = existing.id;
@@ -105,7 +138,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         } else {
           const created = await createUser({
             email: token.email,
-            name:  (token.name  as string | undefined) ?? "Google User",
+            name:  (token.name    as string | undefined) ?? "Google User",
             image: (token.picture as string | undefined) ?? undefined,
             role:  "buyer",
           });
@@ -115,6 +148,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       return token;
+    },
+
+    session({ session, token }) {
+      session.user.id   = (token.id ?? token.sub) as string;
+      session.user.role = (token.role as string | undefined) ?? "buyer";
+      console.log("[session] id=%s role=%s email=%s",
+        session.user.id, session.user.role, session.user.email,
+      );
+      return session;
     },
   },
 });
