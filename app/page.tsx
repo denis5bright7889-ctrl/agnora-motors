@@ -36,7 +36,7 @@ export default function HomePage() {
             </p>
             <h1
               className="font-display leading-[1.05] tracking-tight"
-              style={{ fontSize: "clamp(48px, 7vw, 96px)" }}
+              style={{ fontSize: "clamp(36px, 8vw, 96px)" }}
             >
               Find the{" "}
               <em className="not-italic text-accent italic">one</em> that drives
@@ -190,7 +190,7 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="relative">
+            <div className="relative pb-4">
               <div className="rounded-3xl border border-border bg-surface p-6 shadow-xl shadow-black/5 dark:shadow-black/30">
                 <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface-2 mb-5">
                   <Image

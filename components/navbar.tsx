@@ -164,13 +164,36 @@ export function Navbar() {
         )}
         aria-hidden={!open}
       >
-        <div className="container max-w-container py-6">
+        <div className="container max-w-container py-5">
           <nav className="flex flex-col gap-1" aria-label="Mobile">
+            {/* User info when signed in */}
+            {session && (
+              <div className="mb-3 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
+                  {(session.user.name ?? session.user.email ?? "U")[0].toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold truncate">
+                    {session.user.name ?? "My account"}
+                  </p>
+                  <p className="text-xs text-muted truncate">{session.user.email}</p>
+                </div>
+                <span className={cn(
+                  "ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
+                  isAdmin ? "bg-accent-soft text-accent" :
+                  isDealer ? "bg-blue-500/15 text-blue-500" :
+                  "bg-surface text-muted border border-border",
+                )}>
+                  {role}
+                </span>
+              </div>
+            )}
+
             {navLinks.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
-                className="flex h-12 items-center rounded-2xl px-4 text-base hover:bg-surface-2"
+                className="flex h-12 items-center rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors"
               >
                 {l.label}
               </Link>
@@ -179,30 +202,39 @@ export function Navbar() {
             {session ? (
               <>
                 {isAdmin && (
-                  <Link href="/admin" className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2">
+                  <Link href="/admin" className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors">
                     <ShieldCheck className="h-5 w-5 text-accent" /> Admin panel
                   </Link>
                 )}
                 {(isDealer || isAdmin) && (
-                  <Link href="/dealer/dashboard" className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2">
+                  <Link href="/dealer/dashboard" className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors">
                     <LayoutDashboard className="h-5 w-5" /> Dealer dashboard
                   </Link>
                 )}
                 <button
                   type="button"
                   onClick={() => signOut({ callbackUrl: "/" })}
-                  className="mt-2 flex h-12 items-center justify-center rounded-full border border-border text-sm font-medium"
+                  className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-sm font-medium text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
                 >
+                  <LogOut className="h-4 w-4" />
                   Sign out
                 </button>
               </>
             ) : (
-              <Link
-                href="/login"
-                className="mt-4 flex h-12 items-center justify-center rounded-full bg-foreground text-background text-sm font-medium"
-              >
-                Sign in
-              </Link>
+              <div className="mt-4 flex flex-col gap-2">
+                <Link
+                  href="/login"
+                  className="flex h-12 items-center justify-center rounded-full bg-foreground text-background text-sm font-medium hover:opacity-90 transition-opacity"
+                >
+                  Sign in
+                </Link>
+                <Link
+                  href="/register"
+                  className="flex h-12 items-center justify-center rounded-full border border-border text-sm font-medium hover:bg-surface-2 transition-colors"
+                >
+                  Create account
+                </Link>
+              </div>
             )}
           </nav>
         </div>

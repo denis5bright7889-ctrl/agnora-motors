@@ -75,8 +75,11 @@ export function CarCard({ car, priority, className, wishlistIds, onWishlistToggl
         aria-label={saved ? "Remove from saved" : "Save car"}
         onClick={handleWishlist}
         className={cn(
-          "absolute right-3 top-3 hidden h-8 w-8 items-center justify-center rounded-full backdrop-blur transition-all group-hover:flex hover:scale-110 z-10",
-          saved ? "bg-accent text-white flex" : "bg-white/95 text-neutral-900",
+          // Always visible on touch screens; fades in on hover for pointer devices.
+          "absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full backdrop-blur transition-all hover:scale-110 z-10",
+          saved
+            ? "bg-accent text-white"
+            : "bg-white/90 text-neutral-900 md:opacity-0 md:group-hover:opacity-100",
         )}
       >
         <Heart className={cn("h-4 w-4", saved && "fill-current")} />

@@ -32,7 +32,8 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
 
   return (
     <>
-      <div className="min-h-screen">
+      {/* Extra bottom padding on mobile so the sticky CTA doesn't overlap content */}
+      <div className="min-h-screen pb-20 lg:pb-0">
         {/* Breadcrumb */}
         <div className="border-b border-border bg-surface/50">
           <div className="container max-w-container py-3 flex items-center gap-2 text-sm text-muted">
@@ -156,14 +157,14 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
 
               {/* Tabs */}
               <div>
-                <div className="flex gap-1 rounded-2xl bg-surface-2 p-1 w-fit">
+                <div className="flex gap-1 rounded-2xl bg-surface-2 p-1 w-full sm:w-fit">
                   {(["overview", "specs", "inspection"] as const).map((t) => (
                     <button
                       key={t}
                       type="button"
                       onClick={() => setTab(t)}
                       className={cn(
-                        "rounded-xl px-4 py-2 text-sm font-medium capitalize transition-colors",
+                        "flex-1 sm:flex-none rounded-xl px-4 py-2.5 text-sm font-medium capitalize transition-colors",
                         tab === t ? "bg-background text-foreground shadow-sm" : "text-muted hover:text-foreground"
                       )}
                     >
@@ -350,6 +351,32 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Sticky mobile price + contact CTA */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-30 border-t border-border bg-background/95 backdrop-blur-md px-4 py-3">
+        <div className="flex items-center gap-3 max-w-container mx-auto">
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-lg leading-none">KSh {formatPrice(car!.price)}</p>
+            <p className="text-xs text-muted mt-0.5 truncate">
+              {car!.year} {car!.make} {car!.model}
+            </p>
+          </div>
+          <a
+            href={`tel:${car!.dealer.phone}`}
+            className="shrink-0 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-2 transition-colors hover:bg-surface"
+            aria-label="Call dealer"
+          >
+            <Phone className="h-4 w-4" />
+          </a>
+          <button
+            type="button"
+            onClick={() => setContactOpen(true)}
+            className="shrink-0 h-11 rounded-full bg-accent text-white px-5 text-sm font-semibold hover:opacity-90 transition-opacity"
+          >
+            Message
+          </button>
         </div>
       </div>
 

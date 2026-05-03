@@ -103,7 +103,7 @@ export default async function AdminPage() {
       )}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
         {statCards.map(({ label, value, icon: Icon, href, accent }) => (
           <Link
             key={label}
@@ -148,13 +148,16 @@ export default async function AdminPage() {
           ) : (
             <ul className="divide-y divide-border">
               {pendingDealers.slice(0, 5).map((d) => (
-                <li key={d.id} className="flex items-center justify-between px-5 py-3">
-                  <div>
-                    <p className="font-medium text-sm">{d.businessName}</p>
-                    <p className="text-xs text-muted">{d.userEmail}</p>
+                <li key={d.id} className="flex items-start justify-between gap-3 px-5 py-3">
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm truncate">{d.businessName}</p>
+                    <p className="text-xs text-muted truncate">{d.userEmail}</p>
+                    <p className="text-xs text-muted mt-0.5 sm:hidden">
+                      {new Date(d.createdAt).toLocaleDateString("en-KE")}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-muted">
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="hidden sm:block text-xs text-muted">
                       {new Date(d.createdAt).toLocaleDateString("en-KE")}
                     </span>
                     <Link

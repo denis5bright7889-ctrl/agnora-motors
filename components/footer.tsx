@@ -54,7 +54,7 @@ export function Footer() {
             <p className="mt-4 max-w-xs text-sm text-muted">
               Kenya's easiest way to buy and sell cars. Thousands of listings from verified dealers across the country.
             </p>
-            <form className="mt-6 flex max-w-sm gap-2">
+            <form className="mt-6 flex flex-col gap-2 sm:flex-row sm:max-w-sm">
               <label htmlFor="newsletter" className="sr-only">Email address</label>
               <input
                 id="newsletter"
@@ -64,7 +64,7 @@ export function Footer() {
               />
               <button
                 type="button"
-                className="h-11 rounded-full bg-foreground px-5 text-sm font-medium text-background transition-opacity hover:opacity-90"
+                className="h-11 rounded-full bg-foreground px-5 text-sm font-medium text-background transition-opacity hover:opacity-90 sm:shrink-0"
               >
                 Subscribe
               </button>

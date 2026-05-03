@@ -88,7 +88,7 @@ export function HeroSearch() {
       </div>
 
       {/* Fields */}
-      <div className="grid grid-cols-2 gap-2 p-2">
+      <div className="grid grid-cols-2 gap-2 p-2 sm:grid-cols-2">
         <SelectField
           label="Make"
           value={make}
