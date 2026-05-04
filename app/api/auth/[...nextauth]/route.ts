@@ -1,12 +1,6 @@
 import { handlers } from "@/auth";
-import type { NextRequest } from "next/server";
 
+// Next.js 15 / NextAuth v5 — export handlers directly.
+// runtime must be nodejs (not edge) because auth.ts imports bcrypt and fs.
 export const runtime = "nodejs";
-
-export function GET(req: NextRequest) {
-  return handlers.GET(req);
-}
-
-export function POST(req: NextRequest) {
-  return handlers.POST(req);
-}
+export const { GET, POST } = handlers;

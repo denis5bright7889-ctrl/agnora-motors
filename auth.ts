@@ -30,9 +30,7 @@ function getEnvAdmin() {
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
 
-  // NextAuth v5 reads AUTH_SECRET first, NEXTAUTH_SECRET as fallback.
-  // Explicitly binding both here ensures sessions survive across Vercel invocations
-  // regardless of which env var name is set on the dashboard.
+  // AUTH_SECRET is the v5 canonical name; NEXTAUTH_SECRET kept for fallback.
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
 
   debug: process.env.NODE_ENV === "development",
@@ -41,6 +39,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Google({
       clientId:     process.env.GOOGLE_CLIENT_ID     ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      authorization: {
+        params: {
+          // Force account chooser every time and request offline access so
+          // NextAuth always receives a fresh refresh token on each sign-in.
+          prompt:        "select_account",
+          access_type:   "offline",
+          response_type: "code",
+        },
+      },
     }),
 
     Credentials({
@@ -60,7 +67,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         const { email, password } = parsed.data;
 
-        // ── 1. Env-based admin fallback (no DB required) ──────────
+        // 1. Env-based admin fallback (no DB required)
         const envAdmin = getEnvAdmin();
         if (envAdmin && email.toLowerCase() === envAdmin.email.toLowerCase()) {
           const valid = await bcrypt.compare(password, envAdmin.passwordHash);
@@ -69,7 +76,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return { id: envAdmin.id, email: envAdmin.email, name: envAdmin.name, role: envAdmin.role };
         }
 
-        // ── 2. File-based local users (no DB required) ────────────
+        // 2. File-based local users (no DB required)
         const localUser = findLocalUser(email);
         if (localUser) {
           const valid = await bcrypt.compare(password, localUser.passwordHash);
@@ -78,72 +85,92 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return { id: localUser.id, email: localUser.email, name: localUser.name, role: localUser.role };
         }
 
-        // ── 3. Database users ─────────────────────────────────────
+        // 3. Database users
         if (!isDbConfigured()) {
           console.log("[authorize] no DB configured and no local user found for %s", email);
           return null;
         }
 
-        const user = await getUserWithHash(email);
-        if (!user?.passwordHash) {
-          console.log("[authorize] db: no user or no password hash for %s", email);
+        try {
+          const user = await getUserWithHash(email);
+          if (!user?.passwordHash) {
+            console.log("[authorize] db: no user or no password hash for %s", email);
+            return null;
+          }
+          const valid = await bcrypt.compare(password, user.passwordHash);
+          console.log("[authorize] db email=%s valid=%s", email, valid);
+          if (!valid) return null;
+          return {
+            id:    user.id,
+            email: user.email,
+            name:  user.name  ?? undefined,
+            image: user.image ?? undefined,
+            role:  user.role,
+          };
+        } catch (err) {
+          console.error("[authorize] db lookup failed for %s:", email, err instanceof Error ? err.message : err);
           return null;
         }
-
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        console.log("[authorize] db email=%s valid=%s", email, valid);
-        if (!valid) return null;
-
-        return {
-          id:    user.id,
-          email: user.email,
-          name:  user.name  ?? undefined,
-          image: user.image ?? undefined,
-          role:  user.role,
-        };
       },
     }),
   ],
 
   callbacks: {
-    // Keep the Edge-safe session callback from authConfig (used by middleware too).
-    // The jwt and session overrides here add logging and Google DB upsert logic.
-    ...authConfig.callbacks,
-
     signIn({ user, account }) {
       console.log("[signIn] provider=%s email=%s id=%s",
         account?.provider ?? "credentials",
-        user?.email ?? "unknown",
-        user?.id    ?? "unknown",
+        user?.email       ?? "unknown",
+        user?.id          ?? "unknown",
       );
       return true;
     },
 
     async jwt({ token, user, account }) {
+      // Branch A: first sign-in — user and account are populated
       if (user) {
-        console.log("[jwt] new sign-in id=%s email=%s role=%s",
-          user.id, user.email, (user as { role?: string }).role ?? "buyer",
+        console.log("[jwt] fresh sign-in provider=%s id=%s email=%s role=%s",
+          account?.provider ?? "credentials",
+          user.id, user.email,
+          (user as { role?: string }).role ?? "buyer",
         );
         token.id   = user.id;
         token.role = (user as { role?: string }).role ?? "buyer";
       }
 
-      // Only runs on the initial Google sign-in (account is null on subsequent requests).
+      // Branch B: Google first sign-in → upsert user into our DB
+      // `account` is only present on the initial OAuth sign-in, not on refresh calls.
       if (account?.provider === "google" && token.email && isDbConfigured()) {
-        console.log("[jwt] google DB upsert for %s", token.email);
-        const existing = await getUserByEmail(token.email);
-        if (existing) {
-          token.id   = existing.id;
-          token.role = existing.role;
-        } else {
-          const created = await createUser({
-            email: token.email,
-            name:  (token.name    as string | undefined) ?? "Google User",
-            image: (token.picture as string | undefined) ?? undefined,
-            role:  "buyer",
-          });
-          token.id   = created.id;
-          token.role = "buyer";
+        try {
+          console.log("[jwt] google upsert start for %s", token.email);
+          const existing = await getUserByEmail(token.email as string);
+
+          if (existing) {
+            token.id   = existing.id;
+            token.role = existing.role;
+            console.log("[jwt] google found existing user id=%s role=%s", existing.id, existing.role);
+          } else {
+            const created = await createUser({
+              email: token.email as string,
+              name:  (token.name    as string | undefined) ?? "Google User",
+              image: (token.picture as string | undefined) ?? undefined,
+              role:  "buyer",
+            });
+            token.id   = created.id;
+            token.role = "buyer";
+            console.log("[jwt] google created new user id=%s", created.id);
+          }
+        } catch (err) {
+          // Never throw here — a thrown jwt callback causes NextAuth to redirect
+          // to /login?error=Callback, which looks like a login loop.
+          // Fall through gracefully: the user stays signed in with their Google
+          // sub as the id. DB sync can be retried on the next request.
+          console.error(
+            "[jwt] google upsert FAILED for %s — using Google sub as id. Error: %s",
+            token.email,
+            err instanceof Error ? err.message : String(err),
+          );
+          if (!token.id)   token.id   = token.sub;
+          if (!token.role) token.role = "buyer";
         }
       }
 
@@ -153,10 +180,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       session.user.id   = (token.id ?? token.sub) as string;
       session.user.role = (token.role as string | undefined) ?? "buyer";
-      console.log("[session] id=%s role=%s email=%s",
+      console.log("[session] built id=%s role=%s email=%s",
         session.user.id, session.user.role, session.user.email,
       );
       return session;
+    },
+
+    // Explicit redirect callback with logging to diagnose redirect-loop issues.
+    async redirect({ url, baseUrl }) {
+      console.log("[redirect] url=%s baseUrl=%s", url, baseUrl);
+      // Allow relative URLs (e.g. "/", "/cars")
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      // Allow same-origin absolute URLs
+      try {
+        if (new URL(url).origin === new URL(baseUrl).origin) return url;
+      } catch {
+        // malformed url — fall through to baseUrl
+      }
+      return baseUrl;
     },
   },
 });
