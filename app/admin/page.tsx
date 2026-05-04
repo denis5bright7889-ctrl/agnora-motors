@@ -21,12 +21,16 @@ export default async function AdminPage() {
   let topCars: { id: string; make: string; model: string; year: number; views: string }[] = [];
 
   if (dbUp) {
-    [stats, pendingDealers, topCars] = await Promise.all([
-      getAdminStats(),
-      listDealers("pending"),
-      getMostViewedCars(5),
-    ]);
-    stats.totalCars += staticCars.length;
+    try {
+      [stats, pendingDealers, topCars] = await Promise.all([
+        getAdminStats(),
+        listDealers("pending"),
+        getMostViewedCars(5),
+      ]);
+      stats.totalCars += staticCars.length;
+    } catch (err) {
+      console.error("[admin/page] DB error:", err instanceof Error ? err.message : err);
+    }
   }
 
   const statCards = [

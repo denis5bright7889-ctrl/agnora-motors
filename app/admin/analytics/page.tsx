@@ -51,15 +51,19 @@ export default async function AdminAnalyticsPage() {
   let dailyViews: { date: string; views: string }[] = mockDailyViews();
 
   if (dbUp) {
-    [stats, topMakes, topCars, dailyViews] = await Promise.all([
-      getAdminStats(),
-      getTopSearchedMakes(8),
-      getMostViewedCars(10),
-      getDailyViews(14),
-    ]);
-    if (topMakes.length === 0) topMakes = staticMakeCounts();
-    if (dailyViews.length === 0) dailyViews = mockDailyViews();
-    stats.totalCars += staticCars.length;
+    try {
+      [stats, topMakes, topCars, dailyViews] = await Promise.all([
+        getAdminStats(),
+        getTopSearchedMakes(8),
+        getMostViewedCars(10),
+        getDailyViews(14),
+      ]);
+      if (topMakes.length === 0) topMakes = staticMakeCounts();
+      if (dailyViews.length === 0) dailyViews = mockDailyViews();
+      stats.totalCars += staticCars.length;
+    } catch (err) {
+      console.error("[admin/analytics] DB error:", err instanceof Error ? err.message : err);
+    }
   }
 
   const maxViews = Math.max(...dailyViews.map((d) => Number(d.views)), 1);
