@@ -1,8 +1,8 @@
 import { neon } from "@neondatabase/serverless";
 import type { Car, Dealer, DealerCar, User } from "@/types";
 
-// neon() uses HTTP (fetch) transport — works on Node.js 18 and Edge runtimes
-// without needing a WebSocket polyfill. Each call is a stateless HTTP request.
+// neon() v1.x — use sql.query(text, params) for parameterized calls.
+// Tagged-template form (sql`...`) is for unparameterized / interpolated queries only.
 let _sql: ReturnType<typeof neon> | null = null;
 
 function getSql(): ReturnType<typeof neon> {
@@ -23,8 +23,8 @@ export async function query<T = Record<string, unknown>>(
   params: unknown[] = [],
 ): Promise<T[]> {
   const sql = getSql();
-  // neon() called as sql(text, paramsArray) returns rows directly (T[])
-  const rows = await (sql as unknown as (t: string, p: unknown[]) => Promise<T[]>)(
+  // sql.query() is the v1.x API for conventional parameterized queries.
+  const rows = await (sql as unknown as { query: (t: string, p: unknown[]) => Promise<T[]> }).query(
     text,
     params,
   );
