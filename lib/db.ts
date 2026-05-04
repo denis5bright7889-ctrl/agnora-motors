@@ -98,6 +98,10 @@ export async function listUsers(): Promise<User[]> {
   );
 }
 
+export async function updateUserRole(id: string, role: string): Promise<void> {
+  await query("UPDATE users SET role = $1 WHERE id = $2", [role, id]);
+}
+
 // ── Dealers ────────────────────────────────────────────────
 
 export async function createDealer(data: {

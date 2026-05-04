@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { signIn } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { useState, Suspense } from "react";
 import { cn } from "@/lib/utils";
@@ -20,9 +20,10 @@ type FormData = z.infer<typeof schema>;
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextUrl = searchParams.get("next") ?? "/";
+  const nextUrl = searchParams.get("next") ?? "";
   const [showPw, setShowPw] = useState(false);
   const [serverError, setServerError] = useState("");
+  const { update } = useSession();
 
   const {
     register,
@@ -43,7 +44,19 @@ function LoginForm() {
       return;
     }
 
-    router.push(nextUrl);
+    // Fetch the fresh session so we can redirect to the right place.
+    const session = await update();
+    const role = session?.user?.role;
+
+    if (nextUrl) {
+      router.push(nextUrl);
+    } else if (role === "admin") {
+      router.push("/admin");
+    } else if (role === "dealer") {
+      router.push("/dealer/dashboard");
+    } else {
+      router.push("/");
+    }
     router.refresh();
   }
 
