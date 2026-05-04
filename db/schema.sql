@@ -109,6 +109,71 @@ CREATE INDEX IF NOT EXISTS idx_dealers_user     ON dealers(user_id);
 CREATE INDEX IF NOT EXISTS idx_contact_dealer   ON contact_requests(dealer_id);
 CREATE INDEX IF NOT EXISTS idx_cars_seller      ON cars(seller_user_id);
 
+-- ── News articles (aggregated from APIs, RSS, and scraping) ─────────────────
+CREATE TABLE IF NOT EXISTS news_articles (
+  id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  title        TEXT        NOT NULL,
+  slug         TEXT        UNIQUE NOT NULL,
+  source       TEXT        NOT NULL,
+  source_url   TEXT        NOT NULL,
+  country      TEXT        NOT NULL DEFAULT 'global',
+  category     TEXT        NOT NULL DEFAULT 'global',
+  content      TEXT,
+  summary      TEXT,
+  image        TEXT,
+  url          TEXT        NOT NULL,
+  url_hash     TEXT        UNIQUE NOT NULL,
+  title_hash   TEXT        NOT NULL,
+  published_at TIMESTAMPTZ NOT NULL,
+  tags         TEXT[]      DEFAULT '{}',
+  status       TEXT        NOT NULL DEFAULT 'published',
+  featured     BOOLEAN     DEFAULT FALSE,
+  view_count   INTEGER     DEFAULT 0,
+  created_at   TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_news_status      ON news_articles(status);
+CREATE INDEX IF NOT EXISTS idx_news_category    ON news_articles(category);
+CREATE INDEX IF NOT EXISTS idx_news_country     ON news_articles(country);
+CREATE INDEX IF NOT EXISTS idx_news_published   ON news_articles(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_featured    ON news_articles(featured) WHERE featured = TRUE;
+CREATE INDEX IF NOT EXISTS idx_news_url_hash    ON news_articles(url_hash);
+CREATE INDEX IF NOT EXISTS idx_news_title_hash  ON news_articles(title_hash);
+
+-- ── Research articles (editorial: reviews, guides, comparisons) ──────────────
+CREATE TABLE IF NOT EXISTS research_articles (
+  id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  title            TEXT        NOT NULL,
+  slug             TEXT        UNIQUE NOT NULL,
+  category         TEXT        NOT NULL,
+  content          TEXT        NOT NULL DEFAULT '',
+  excerpt          TEXT,
+  author           TEXT        NOT NULL DEFAULT 'Agnora Editorial',
+  seo_title        TEXT,
+  seo_description  TEXT,
+  featured_image   TEXT,
+  tags             TEXT[]      DEFAULT '{}',
+  status           TEXT        NOT NULL DEFAULT 'draft',
+  featured         BOOLEAN     DEFAULT FALSE,
+  view_count       INTEGER     DEFAULT 0,
+  sponsored        BOOLEAN     DEFAULT FALSE,
+  sponsor_name     TEXT,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_research_status   ON research_articles(status);
+CREATE INDEX IF NOT EXISTS idx_research_category ON research_articles(category);
+CREATE INDEX IF NOT EXISTS idx_research_featured ON research_articles(featured) WHERE featured = TRUE;
+
+-- ── Subscriptions (dealer + private seller plan tracking) ────────────────────
+CREATE TABLE IF NOT EXISTS subscriptions (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    TEXT        UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan       TEXT        NOT NULL DEFAULT 'free',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Seed admin (update email/password after running)
 INSERT INTO users (id, email, name, role)
 VALUES ('admin-seed-id', 'admin@agnora.co.ke', 'Admin', 'admin')

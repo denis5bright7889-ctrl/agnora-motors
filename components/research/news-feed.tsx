@@ -3,8 +3,14 @@
 import { useState, useEffect } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { formatDate } from "@/lib/utils";
-import type { NewsItem } from "@/app/api/news/route";
+import type { NewsArticle } from "@/types";
 import { cn } from "@/lib/utils";
+
+// Legacy alias — the new API returns NewsArticle objects
+type NewsItem = Pick<NewsArticle, "id" | "source" | "url" | "image" | "category" | "publishedAt"> & {
+  title: string;
+  excerpt: string;
+};
 
 const CATEGORIES = ["All", "Luxury", "Electric", "SUV", "Hybrid", "Vintage"];
 
@@ -108,7 +114,7 @@ function NewsCard({ item, featured }: { item: NewsItem; featured?: boolean }) {
         <div className="sm:w-64 shrink-0 aspect-video sm:aspect-auto overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={item.image}
+            src={item.image ?? undefined}
             alt={item.title}
             className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
           />
@@ -145,7 +151,7 @@ function NewsCard({ item, featured }: { item: NewsItem; featured?: boolean }) {
       <div className="aspect-[16/9] overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={item.image}
+          src={item.image ?? undefined}
           alt={item.title}
           className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500"
         />

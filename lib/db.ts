@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import type { Car, Dealer, DealerCar, User } from "@/types";
+import type { Car, Dealer, DealerCar, User, NewsArticle, ResearchArticle } from "@/types";
 
 // neon() v1.x — use sql.query(text, params) for parameterized calls.
 // Tagged-template form (sql`...`) is for unparameterized / interpolated queries only.
@@ -726,5 +726,269 @@ export async function boostCar(carId: string, hours = 72): Promise<void> {
     `UPDATE cars SET boost_expires_at = NOW() + INTERVAL '${hours} hours', updated_at = NOW()
      WHERE id = $1`,
     [carId],
+  );
+}
+
+// ── News articles ─────────────────────────────────────────────────────────────
+
+function mapNewsRow(r: Record<string, unknown>): NewsArticle {
+  return {
+    id:         r.id as string,
+    title:      r.title as string,
+    slug:       r.slug as string,
+    source:     r.source as string,
+    sourceUrl:  r.source_url as string,
+    country:    r.country as string,
+    category:   r.category as string,
+    content:    (r.content as string | null) ?? null,
+    summary:    (r.summary as string | null) ?? null,
+    image:      (r.image as string | null) ?? null,
+    url:        r.url as string,
+    urlHash:    r.url_hash as string,
+    titleHash:  r.title_hash as string,
+    publishedAt: r.published_at as string,
+    tags:       (r.tags as string[]) ?? [],
+    status:     r.status as NewsArticle["status"],
+    featured:   Boolean(r.featured),
+    viewCount:  Number(r.view_count ?? 0),
+    createdAt:  r.created_at as string,
+  };
+}
+
+export interface GetNewsOptions {
+  category?: string;
+  country?: string;
+  status?: string;
+  featured?: boolean;
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
+
+export async function getNewsArticles(opts: GetNewsOptions = {}): Promise<NewsArticle[]> {
+  const {
+    category, country, status = "published",
+    featured, limit = 20, offset = 0, search,
+  } = opts;
+
+  const conditions = ["status = $1"];
+  const params: unknown[] = [status];
+  let idx = 2;
+
+  if (category && category !== "all") {
+    conditions.push(`category = $${idx++}`);
+    params.push(category);
+  }
+  if (country && country !== "all") {
+    conditions.push(`country = $${idx++}`);
+    params.push(country);
+  }
+  if (featured) {
+    conditions.push("featured = TRUE");
+  }
+  if (search) {
+    conditions.push(`(title ILIKE $${idx} OR summary ILIKE $${idx})`);
+    params.push(`%${search}%`);
+    idx++;
+  }
+
+  params.push(limit, offset);
+
+  const rows = await query<Record<string, unknown>>(
+    `SELECT * FROM news_articles
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY published_at DESC
+     LIMIT $${idx} OFFSET $${idx + 1}`,
+    params,
+  );
+  return rows.map(mapNewsRow);
+}
+
+export async function getNewsArticleBySlug(slug: string): Promise<NewsArticle | null> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT * FROM news_articles WHERE slug = $1 AND status = 'published' LIMIT 1`,
+    [slug],
+  );
+  return rows[0] ? mapNewsRow(rows[0]) : null;
+}
+
+export async function getRelatedNewsArticles(
+  category: string,
+  excludeId: string,
+  limit = 4,
+): Promise<NewsArticle[]> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT * FROM news_articles
+     WHERE category = $1 AND id != $2 AND status = 'published'
+     ORDER BY published_at DESC LIMIT $3`,
+    [category, excludeId, limit],
+  );
+  return rows.map(mapNewsRow);
+}
+
+export async function incrementNewsViewCount(id: string): Promise<void> {
+  await query(
+    `UPDATE news_articles SET view_count = view_count + 1 WHERE id = $1`,
+    [id],
+  );
+}
+
+export async function isNewsUrlKnown(urlHash: string, titleHash: string): Promise<boolean> {
+  const rows = await query<{ exists: boolean }>(
+    `SELECT EXISTS(
+       SELECT 1 FROM news_articles WHERE url_hash = $1 OR title_hash = $2
+     ) AS exists`,
+    [urlHash, titleHash],
+  );
+  return rows[0]?.exists ?? false;
+}
+
+export async function updateNewsArticleStatus(
+  id: string,
+  status: "published" | "pending" | "rejected",
+): Promise<void> {
+  await query(
+    `UPDATE news_articles SET status = $1 WHERE id = $2`,
+    [status, id],
+  );
+}
+
+export async function toggleNewsArticleFeatured(id: string, featured: boolean): Promise<void> {
+  await query(
+    `UPDATE news_articles SET featured = $1 WHERE id = $2`,
+    [featured, id],
+  );
+}
+
+export async function deleteNewsArticle(id: string): Promise<void> {
+  await query(`DELETE FROM news_articles WHERE id = $1`, [id]);
+}
+
+export async function getNewsCount(status?: string): Promise<number> {
+  const rows = await query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM news_articles${status ? ` WHERE status = '${status}'` : ""}`,
+    [],
+  );
+  return Number(rows[0]?.count ?? 0);
+}
+
+// ── Research articles ─────────────────────────────────────────────────────────
+
+function mapResearchRow(r: Record<string, unknown>): ResearchArticle {
+  return {
+    id:             r.id as string,
+    title:          r.title as string,
+    slug:           r.slug as string,
+    category:       r.category as ResearchArticle["category"],
+    content:        r.content as string,
+    excerpt:        (r.excerpt as string | null) ?? null,
+    author:         r.author as string,
+    seoTitle:       (r.seo_title as string | null) ?? null,
+    seoDescription: (r.seo_description as string | null) ?? null,
+    featuredImage:  (r.featured_image as string | null) ?? null,
+    tags:           (r.tags as string[]) ?? [],
+    status:         r.status as ResearchArticle["status"],
+    featured:       Boolean(r.featured),
+    viewCount:      Number(r.view_count ?? 0),
+    sponsored:      Boolean(r.sponsored),
+    sponsorName:    (r.sponsor_name as string | null) ?? null,
+    createdAt:      r.created_at as string,
+    updatedAt:      r.updated_at as string,
+  };
+}
+
+export async function getResearchArticles(
+  opts: { category?: string; status?: string; limit?: number; offset?: number } = {},
+): Promise<ResearchArticle[]> {
+  const { category, status = "published", limit = 20, offset = 0 } = opts;
+  const conditions = ["status = $1"];
+  const params: unknown[] = [status];
+  let idx = 2;
+
+  if (category && category !== "all") {
+    conditions.push(`category = $${idx++}`);
+    params.push(category);
+  }
+  params.push(limit, offset);
+
+  const rows = await query<Record<string, unknown>>(
+    `SELECT * FROM research_articles
+     WHERE ${conditions.join(" AND ")}
+     ORDER BY created_at DESC
+     LIMIT $${idx} OFFSET $${idx + 1}`,
+    params,
+  );
+  return rows.map(mapResearchRow);
+}
+
+export async function getResearchArticleBySlug(slug: string): Promise<ResearchArticle | null> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT * FROM research_articles WHERE slug = $1 AND status = 'published' LIMIT 1`,
+    [slug],
+  );
+  return rows[0] ? mapResearchRow(rows[0]) : null;
+}
+
+export async function createResearchArticle(
+  data: Omit<ResearchArticle, "id" | "viewCount" | "createdAt" | "updatedAt">,
+): Promise<ResearchArticle> {
+  const rows = await query<Record<string, unknown>>(
+    `INSERT INTO research_articles
+       (title, slug, category, content, excerpt, author,
+        seo_title, seo_description, featured_image,
+        tags, status, featured, sponsored, sponsor_name)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     RETURNING *`,
+    [
+      data.title, data.slug, data.category, data.content,
+      data.excerpt, data.author, data.seoTitle, data.seoDescription,
+      data.featuredImage, data.tags, data.status, data.featured,
+      data.sponsored, data.sponsorName,
+    ],
+  );
+  return mapResearchRow(rows[0]);
+}
+
+export async function updateResearchArticle(
+  id: string,
+  data: Partial<Omit<ResearchArticle, "id" | "createdAt">>,
+): Promise<void> {
+  const fields: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  const colMap: Record<string, string> = {
+    title: "title", slug: "slug", category: "category", content: "content",
+    excerpt: "excerpt", author: "author", seoTitle: "seo_title",
+    seoDescription: "seo_description", featuredImage: "featured_image",
+    tags: "tags", status: "status", featured: "featured",
+    sponsored: "sponsored", sponsorName: "sponsor_name",
+  };
+
+  for (const [key, col] of Object.entries(colMap)) {
+    if (key in data) {
+      fields.push(`${col} = $${idx++}`);
+      params.push((data as Record<string, unknown>)[key]);
+    }
+  }
+  if (fields.length === 0) return;
+
+  fields.push(`updated_at = NOW()`);
+  params.push(id);
+
+  await query(
+    `UPDATE research_articles SET ${fields.join(", ")} WHERE id = $${idx}`,
+    params,
+  );
+}
+
+export async function deleteResearchArticle(id: string): Promise<void> {
+  await query(`DELETE FROM research_articles WHERE id = $1`, [id]);
+}
+
+export async function incrementResearchViewCount(id: string): Promise<void> {
+  await query(
+    `UPDATE research_articles SET view_count = view_count + 1 WHERE id = $1`,
+    [id],
   );
 }
