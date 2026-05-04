@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS cars (
 -- Migration: add new columns to existing installations
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS financing_available     BOOLEAN DEFAULT FALSE;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS hire_purchase_available BOOLEAN DEFAULT FALSE;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS seller_user_id          TEXT REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS is_featured             BOOLEAN DEFAULT FALSE;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS boost_expires_at        TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS car_views (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -104,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_search_date      ON search_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_dealers_status   ON dealers(status);
 CREATE INDEX IF NOT EXISTS idx_dealers_user     ON dealers(user_id);
 CREATE INDEX IF NOT EXISTS idx_contact_dealer   ON contact_requests(dealer_id);
+CREATE INDEX IF NOT EXISTS idx_cars_seller      ON cars(seller_user_id);
 
 -- Seed admin (update email/password after running)
 INSERT INTO users (id, email, name, role)

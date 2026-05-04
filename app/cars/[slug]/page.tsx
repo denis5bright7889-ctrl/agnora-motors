@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { getCarBySlug, getSimilarCars } from "@/data/cars";
 import { formatPrice, formatMileage, formatDate, cn } from "@/lib/utils";
+import { AiChatWidget } from "@/components/ai-chat-widget";
 
 export default function CarDetailPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = use(params);
@@ -429,6 +430,32 @@ function CarDetail({ car, similar }: { car: ReturnType<typeof getCarBySlug> & ob
       {contactOpen && (
         <ContactModal car={car!} onClose={() => setContactOpen(false)} />
       )}
+
+      {/* AI chat widget — floating assistant for this listing */}
+      <AiChatWidget
+        carDetails={{
+          year: car!.year,
+          make: car!.make,
+          model: car!.model,
+          trim: car!.trim,
+          price: car!.price,
+          mileage: car!.mileage,
+          fuel: car!.fuel,
+          transmission: car!.transmission,
+          condition: car!.condition,
+          bodyType: car!.bodyType,
+          location: car!.location,
+          description: car!.description,
+          features: car!.features,
+        }}
+        sellerInfo={{
+          name: car!.dealer.name,
+          phone: car!.dealer.phone,
+          location: car!.dealer.location,
+          rating: car!.dealer.rating,
+          reviews: car!.dealer.reviews,
+        }}
+      />
     </>
   );
 }

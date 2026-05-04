@@ -2,6 +2,10 @@ export type Condition = "new" | "used" | "certified" | "foreign_used" | "locally
 export type Fuel = "petrol" | "diesel" | "hybrid" | "electric";
 export type Transmission = "auto" | "manual";
 export type BodyType = "suv" | "sedan" | "hatchback" | "pickup" | "coupe" | "wagon" | "van";
+export type DealerStatus = "pending" | "approved" | "rejected";
+export type CarStatus = "active" | "sold" | "draft";
+export type UserRole = "admin" | "dealer" | "private_seller" | "buyer";
+export type PlanId = "free" | "pro" | "premium";
 
 export interface Car {
   id: string;
@@ -21,6 +25,8 @@ export interface Car {
   images: string[];
   features: string[];
   verified: boolean;
+  isFeatured?: boolean;
+  boostExpiresAt?: string | null;
   financingAvailable?: boolean;
   hirePurchaseAvailable?: boolean;
   dealer: {
@@ -56,10 +62,6 @@ export interface Brand {
   count: number;
   topModel?: string;
 }
-
-export type DealerStatus = "pending" | "approved" | "rejected";
-export type CarStatus = "active" | "sold" | "draft";
-export type UserRole = "admin" | "dealer" | "buyer";
 
 export interface Dealer {
   id: string;
@@ -99,6 +101,8 @@ export interface DealerCar {
   images: string[];
   features: string[];
   verified: boolean;
+  isFeatured?: boolean;
+  boostExpiresAt?: string | null;
   financingAvailable?: boolean;
   hirePurchaseAvailable?: boolean;
   status: CarStatus;

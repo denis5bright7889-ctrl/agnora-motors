@@ -519,3 +519,212 @@ export async function recordSearch(data: {
     ],
   );
 }
+
+// ── Subscriptions ──────────────────────────────────────────
+
+export interface Subscription {
+  id: string;
+  userId: string;
+  plan: string;
+  status: string;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getSubscription(userId: string): Promise<Subscription | null> {
+  const rows = await query<Subscription>(
+    `SELECT id, user_id AS "userId", plan, status,
+            expires_at AS "expiresAt",
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM subscriptions WHERE user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  // Auto-create free subscription if missing
+  if (!rows[0]) {
+    await query(
+      `INSERT INTO subscriptions (user_id, plan, status) VALUES ($1, 'free', 'active')
+       ON CONFLICT DO NOTHING`,
+      [userId],
+    );
+    return { id: "", userId, plan: "free", status: "active", expiresAt: null,
+             createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+  }
+  return rows[0];
+}
+
+export async function upsertSubscription(
+  userId: string,
+  plan: string,
+  expiresAt?: Date | null,
+): Promise<void> {
+  await query(
+    `INSERT INTO subscriptions (user_id, plan, status, expires_at, updated_at)
+     VALUES ($1, $2, 'active', $3, NOW())
+     ON CONFLICT (user_id) DO UPDATE
+       SET plan = EXCLUDED.plan,
+           status = 'active',
+           expires_at = EXCLUDED.expires_at,
+           updated_at = NOW()`,
+    [userId, plan, expiresAt ?? null],
+  );
+}
+
+// ── Private sellers ────────────────────────────────────────
+
+export interface PrivateSeller {
+  id: string;
+  userId: string;
+  phone: string;
+  location: string;
+  verified: boolean;
+  createdAt: string;
+  userName?: string | null;
+  userEmail?: string | null;
+}
+
+export async function createPrivateSeller(data: {
+  userId: string;
+  phone: string;
+  location: string;
+}): Promise<PrivateSeller> {
+  const rows = await query<PrivateSeller>(
+    `INSERT INTO private_sellers (user_id, phone, location)
+     VALUES ($1, $2, $3)
+     RETURNING id, user_id AS "userId", phone, location, verified,
+               created_at AS "createdAt"`,
+    [data.userId, data.phone, data.location],
+  );
+  if (!rows[0]) throw new Error("Private seller insert returned no rows");
+  return rows[0];
+}
+
+export async function getPrivateSellerByUserId(userId: string): Promise<PrivateSeller | null> {
+  const rows = await query<PrivateSeller>(
+    `SELECT ps.id, ps.user_id AS "userId", ps.phone, ps.location,
+            ps.verified, ps.created_at AS "createdAt",
+            u.name AS "userName", u.email AS "userEmail"
+     FROM private_sellers ps JOIN users u ON u.id = ps.user_id
+     WHERE ps.user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  return rows[0] ?? null;
+}
+
+// ── Inquiries (contact requests per dealer/seller) ─────────
+
+export interface Inquiry {
+  id: string;
+  carId: string | null;
+  dealerId: string | null;
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone: string | null;
+  message: string;
+  createdAt: string;
+  carMake?: string | null;
+  carModel?: string | null;
+  carYear?: number | null;
+  carSlug?: string | null;
+}
+
+export async function getInquiriesForDealer(dealerId: string): Promise<Inquiry[]> {
+  return query<Inquiry>(
+    `SELECT cr.id, cr.car_id AS "carId", cr.dealer_id AS "dealerId",
+            cr.buyer_name AS "buyerName", cr.buyer_email AS "buyerEmail",
+            cr.buyer_phone AS "buyerPhone", cr.message,
+            cr.created_at AS "createdAt",
+            c.make AS "carMake", c.model AS "carModel",
+            c.year AS "carYear", c.slug AS "carSlug"
+     FROM contact_requests cr
+     LEFT JOIN cars c ON c.id = cr.car_id
+     WHERE cr.dealer_id = $1
+     ORDER BY cr.created_at DESC`,
+    [dealerId],
+  );
+}
+
+export async function getInquiriesForSeller(userId: string): Promise<Inquiry[]> {
+  return query<Inquiry>(
+    `SELECT cr.id, cr.car_id AS "carId", cr.dealer_id AS "dealerId",
+            cr.buyer_name AS "buyerName", cr.buyer_email AS "buyerEmail",
+            cr.buyer_phone AS "buyerPhone", cr.message,
+            cr.created_at AS "createdAt",
+            c.make AS "carMake", c.model AS "carModel",
+            c.year AS "carYear", c.slug AS "carSlug"
+     FROM contact_requests cr
+     LEFT JOIN cars c ON c.id = cr.car_id
+     WHERE c.seller_id = $1
+     ORDER BY cr.created_at DESC`,
+    [userId],
+  );
+}
+
+// ── Car analytics per dealer ───────────────────────────────
+
+export async function getDealerDailyViews(dealerId: string, days = 14) {
+  return query<{ date: string; views: string }>(
+    `SELECT DATE(cv.created_at)::TEXT AS date, COUNT(*)::TEXT AS views
+     FROM car_views cv
+     JOIN cars c ON c.id = cv.car_id
+     WHERE c.dealer_id = $1
+       AND cv.created_at >= NOW() - INTERVAL '${days} days'
+     GROUP BY DATE(cv.created_at)
+     ORDER BY date ASC`,
+    [dealerId],
+  );
+}
+
+export async function getSellerCars(userId: string): Promise<DealerCar[]> {
+  return query<DealerCar>(
+    `SELECT c.id, c.dealer_id AS "dealerId", c.slug, c.year, c.make, c.model,
+            c.trim, c.price, c.mileage, c.fuel, c.transmission,
+            c.body_type AS "bodyType", c.condition, c.location, c.description,
+            c.images, c.features, c.verified, c.status,
+            c.is_featured AS "isFeatured",
+            c.boost_expires_at AS "boostExpiresAt",
+            c.financing_available  AS "financingAvailable",
+            c.hire_purchase_available AS "hirePurchaseAvailable",
+            c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+            COUNT(DISTINCT v.id)::INT  AS views,
+            COUNT(DISTINCT cr.id)::INT AS inquiries
+     FROM cars c
+     LEFT JOIN car_views       v  ON v.car_id  = c.id
+     LEFT JOIN contact_requests cr ON cr.car_id = c.id
+     WHERE c.seller_user_id = $1
+     GROUP BY c.id
+     ORDER BY c.created_at DESC`,
+    [userId],
+  );
+}
+
+export async function getSellerDailyViews(userId: string, days = 14) {
+  return query<{ date: string; views: string }>(
+    `SELECT DATE(cv.created_at)::TEXT AS date, COUNT(*)::TEXT AS views
+     FROM car_views cv
+     JOIN cars c ON c.id = cv.car_id
+     WHERE c.seller_user_id = $1
+       AND cv.created_at >= NOW() - INTERVAL '${days} days'
+     GROUP BY DATE(cv.created_at)
+     ORDER BY date ASC`,
+    [userId],
+  );
+}
+
+// ── Featured / boost ───────────────────────────────────────
+
+export async function toggleFeatured(carId: string, dealerId: string, featured: boolean): Promise<void> {
+  await query(
+    `UPDATE cars SET is_featured = $1, updated_at = NOW()
+     WHERE id = $2 AND dealer_id = $3`,
+    [featured, carId, dealerId],
+  );
+}
+
+export async function boostCar(carId: string, hours = 72): Promise<void> {
+  await query(
+    `UPDATE cars SET boost_expires_at = NOW() + INTERVAL '${hours} hours', updated_at = NOW()
+     WHERE id = $1`,
+    [carId],
+  );
+}

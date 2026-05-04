@@ -96,4 +96,7 @@
   @media (hover: none) {
     .tap-highlight { -webkit-tap-highlight-color: rgb(var(--accent) / 0.15); }
   }
+
+  /* Dashboard bar chart — height driven by --bar-h CSS variable */
+  .bar-fill { height: var(--bar-h, 0%); }
 }
