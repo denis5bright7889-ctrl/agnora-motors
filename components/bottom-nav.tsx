@@ -32,26 +32,29 @@ export function BottomNav() {
 
   if (HIDDEN_ON.some((p) => pathname?.startsWith(p))) return null;
 
-  const profileItem: NavItem = {
-    href: session
-      ? session.user.role === "admin"
-        ? "/admin"
-        : session.user.role === "dealer"
-          ? "/dealer/dashboard"
-          : "/login"
-      : "/login",
-    icon:  User,
-    label: session ? "Account" : "Sign in",
-  };
+  const accountItem: NavItem | null = session
+    ? {
+        href:
+          session.user.role === "admin"
+            ? "/admin"
+            : session.user.role === "dealer"
+              ? "/dealer/dashboard"
+              : "/profile",
+        icon:  User,
+        label: "Account",
+      }
+    : null;
 
-  const items: NavItem[] = [...BASE_ITEMS, profileItem];
+  const items: NavItem[] = accountItem
+    ? [...BASE_ITEMS, accountItem]
+    : BASE_ITEMS;
 
   return (
     <nav
       aria-label="Mobile navigation"
       className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur-md"
     >
-      <div className="grid grid-cols-6 pb-safe">
+      <div className={cn("grid pb-safe", items.length === 6 ? "grid-cols-6" : "grid-cols-5")}>
         {items.map(({ href, icon: Icon, label, accent }) => {
           const active =
             pathname === href ||
