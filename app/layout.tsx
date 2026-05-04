@@ -6,6 +6,8 @@ import { Navbar } from "@/components/navbar";
 import { Footer } from "@/components/footer";
 import { BottomNav } from "@/components/bottom-nav";
 import { PwaRegister } from "@/components/pwa-register";
+import { WishlistProvider } from "@/lib/store";
+import { PageTransition } from "@/components/page-transition";
 import type { Metadata, Viewport } from "next";
 
 const inter = Inter({
@@ -22,11 +24,15 @@ const serif = Instrument_Serif({
   display: "swap",
 });
 
-// ── PWA viewport — viewport-fit:cover enables iOS safe-area insets ──
+// ── PWA viewport ──────────────────────────────────────────────
+// maximumScale:1 + userScalable:false gives an app-like feel on
+// mobile (no unintentional pinch-zoom). viewportFit:cover enables
+// iOS safe-area insets for notch/home-indicator devices.
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  maximumScale: 5,
+  maximumScale: 1,
+  userScalable: false,
   viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
@@ -73,12 +79,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="font-sans min-h-screen flex flex-col">
         <SessionProvider>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
-            <Navbar />
-            {/* pb-14 md:pb-0: reserve space for the 56-px mobile bottom nav */}
-            <main className="flex-1 pb-14 md:pb-0">{children}</main>
-            <Footer />
-            <BottomNav />
-            <PwaRegister />
+            <WishlistProvider>
+              <Navbar />
+              {/* pb-14 md:pb-0: reserve space for the 56-px mobile bottom nav */}
+              <main className="flex-1 pb-14 md:pb-0">
+                <PageTransition>{children}</PageTransition>
+              </main>
+              <Footer />
+              <BottomNav />
+              <PwaRegister />
+            </WishlistProvider>
           </ThemeProvider>
         </SessionProvider>
       </body>

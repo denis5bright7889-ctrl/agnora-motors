@@ -2,17 +2,20 @@
 
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
-import { Menu, X, ChevronDown, LayoutDashboard, ShieldCheck, LogOut, User, Search } from "lucide-react";
+import {
+  Menu, X, ChevronDown, LayoutDashboard, ShieldCheck,
+  LogOut, User, Search, Banknote,
+} from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 
-const navLinks = [
-  { href: "/cars", label: "Buy" },
-  { href: "/sell", label: "Sell" },
+const NAV_LINKS = [
+  { href: "/cars",     label: "Buy" },
+  { href: "/sell",     label: "Sell" },
+  { href: "/finance",  label: "Finance" },
   { href: "/research", label: "Research" },
-  { href: "/finance", label: "Finance" },
 ];
 
 export function Navbar() {
@@ -22,27 +25,30 @@ export function Navbar() {
   const { data: session } = useSession();
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Close mobile drawer on navigation
   useEffect(() => { setOpen(false); }, [pathname]);
 
+  // Lock body scroll when mobile drawer is open
   useEffect(() => {
     document.body.style.overflow = open ? "hidden" : "";
     return () => { document.body.style.overflow = ""; };
   }, [open]);
 
+  // Escape key + outside-click close both menus
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") { setOpen(false); setUserMenuOpen(false); }
     }
-    function onClick(e: MouseEvent) {
+    function onClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
       }
     }
     window.addEventListener("keydown", onKey);
-    document.addEventListener("mousedown", onClick);
+    document.addEventListener("mousedown", onClickOutside);
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("mousedown", onClickOutside);
     };
   }, []);
 
@@ -53,13 +59,16 @@ export function Navbar() {
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       <div className="container max-w-container flex h-16 items-center justify-between">
+
+        {/* Logo */}
         <Link href="/" className="flex items-center gap-2 font-display text-xl tracking-tight">
           <span className="h-2.5 w-2.5 rounded-full bg-accent" aria-hidden />
           <span className="font-medium">Agnora<span className="text-accent">.</span></span>
         </Link>
 
+        {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-7" aria-label="Primary">
-          {navLinks.map((l) => {
+          {NAV_LINKS.map((l) => {
             const active =
               pathname === l.href ||
               (l.href !== "/" && pathname?.startsWith(l.href.split("#")[0]));
@@ -78,10 +87,11 @@ export function Navbar() {
           })}
         </nav>
 
+        {/* Right cluster */}
         <div className="flex items-center gap-2">
           <ThemeToggle />
 
-          {/* ── Signed in ── */}
+          {/* ── Signed in (desktop) ── */}
           {session ? (
             <div className="hidden md:block relative" ref={menuRef}>
               <button
@@ -89,9 +99,9 @@ export function Navbar() {
                 onClick={() => setUserMenuOpen((v) => !v)}
                 className="flex h-10 items-center gap-2 rounded-full border border-border bg-surface-2 px-3 text-sm font-medium hover:bg-surface transition-colors"
               >
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white text-xs font-semibold">
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white text-xs font-semibold">
                   {(session.user.name ?? session.user.email ?? "U")[0].toUpperCase()}
-                </div>
+                </span>
                 <span className="max-w-24 truncate text-xs">
                   {session.user.name ?? session.user.email}
                 </span>
@@ -105,21 +115,19 @@ export function Navbar() {
                     <p className="text-xs text-muted truncate">{session.user.email}</p>
                     <span className={cn(
                       "mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
-                      isAdmin ? "bg-accent-soft text-accent" :
+                      isAdmin  ? "bg-accent-soft text-accent" :
                       isDealer ? "bg-blue-500/15 text-blue-500" :
-                      "bg-surface-2 text-muted",
+                                 "bg-surface-2 text-muted",
                     )}>
                       {role}
                     </span>
                   </div>
 
-                  {isAdmin && (
-                    <MenuItem href="/admin" icon={ShieldCheck} label="Admin panel" />
+                  {isAdmin  && <DropdownItem href="/admin"            icon={ShieldCheck}     label="Admin panel" />}
+                  {(isAdmin || isDealer) && (
+                    <DropdownItem href="/dealer/dashboard" icon={LayoutDashboard} label="Dealer dashboard" />
                   )}
-                  {(isDealer || isAdmin) && (
-                    <MenuItem href="/dealer/dashboard" icon={LayoutDashboard} label="Dealer dashboard" />
-                  )}
-                  <MenuItem href="#" icon={User} label="My profile" />
+                  <DropdownItem href="#" icon={User} label="My profile" />
 
                   <div className="border-t border-border mt-1 pt-1">
                     <button
@@ -143,7 +151,7 @@ export function Navbar() {
             </Link>
           )}
 
-          {/* Mobile: search shortcut + hamburger */}
+          {/* Mobile: search shortcut */}
           <Link
             href="/cars"
             aria-label="Search cars"
@@ -151,6 +159,8 @@ export function Navbar() {
           >
             <Search className="h-4 w-4" />
           </Link>
+
+          {/* Mobile: hamburger */}
           <button
             type="button"
             className="md:hidden h-10 w-10 inline-flex items-center justify-center rounded-full bg-surface-2 border border-border"
@@ -166,67 +176,92 @@ export function Navbar() {
       {/* ── Mobile drawer ── */}
       <div
         className={cn(
-          "md:hidden fixed inset-0 top-16 z-40 bg-background transition-opacity",
+          "md:hidden fixed inset-0 top-16 z-40 bg-background transition-opacity duration-200",
           open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
         )}
         aria-hidden={!open}
       >
-        <div className="container max-w-container py-5">
+        <div className="container max-w-container py-5 h-full overflow-y-auto pb-safe">
           <nav className="flex flex-col gap-1" aria-label="Mobile">
-            {/* User info when signed in */}
+
+            {/* Signed-in user card */}
             {session && (
               <div className="mb-3 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
                   {(session.user.name ?? session.user.email ?? "U")[0].toUpperCase()}
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold truncate">
                     {session.user.name ?? "My account"}
                   </p>
                   <p className="text-xs text-muted truncate">{session.user.email}</p>
                 </div>
                 <span className={cn(
-                  "ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
-                  isAdmin ? "bg-accent-soft text-accent" :
+                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
+                  isAdmin  ? "bg-accent-soft text-accent" :
                   isDealer ? "bg-blue-500/15 text-blue-500" :
-                  "bg-surface text-muted border border-border",
+                             "bg-surface text-muted border border-border",
                 )}>
                   {role}
                 </span>
               </div>
             )}
 
-            {navLinks.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="flex h-12 items-center rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors"
-              >
-                {l.label}
-              </Link>
-            ))}
+            {/* Main nav links */}
+            {NAV_LINKS.map((l) => {
+              const active =
+                pathname === l.href ||
+                (l.href !== "/" && pathname?.startsWith(l.href.split("#")[0]));
+              const Icon = l.href === "/finance" ? Banknote : undefined;
+              return (
+                <Link
+                  key={l.href}
+                  href={l.href}
+                  className={cn(
+                    "flex h-12 items-center gap-3 rounded-2xl px-4 text-base transition-colors",
+                    active
+                      ? "bg-accent-soft text-accent font-medium"
+                      : "hover:bg-surface-2",
+                  )}
+                >
+                  {Icon && <Icon className="h-5 w-5 text-accent" />}
+                  {l.label}
+                </Link>
+              );
+            })}
 
-            {session ? (
+            {/* Role-specific links */}
+            {session && (
               <>
                 {isAdmin && (
-                  <Link href="/admin" className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors">
+                  <Link
+                    href="/admin"
+                    className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors"
+                  >
                     <ShieldCheck className="h-5 w-5 text-accent" /> Admin panel
                   </Link>
                 )}
-                {(isDealer || isAdmin) && (
-                  <Link href="/dealer/dashboard" className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors">
+                {(isAdmin || isDealer) && (
+                  <Link
+                    href="/dealer/dashboard"
+                    className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors"
+                  >
                     <LayoutDashboard className="h-5 w-5" /> Dealer dashboard
                   </Link>
                 )}
-                <button
-                  type="button"
-                  onClick={() => signOut({ callbackUrl: "/" })}
-                  className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-sm font-medium text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-                >
-                  <LogOut className="h-4 w-4" />
-                  Sign out
-                </button>
               </>
+            )}
+
+            {/* Auth actions */}
+            {session ? (
+              <button
+                type="button"
+                onClick={() => signOut({ callbackUrl: "/" })}
+                className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-sm font-medium text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
+              >
+                <LogOut className="h-4 w-4" />
+                Sign out
+              </button>
             ) : (
               <div className="mt-4 flex flex-col gap-2">
                 <Link
@@ -250,13 +285,9 @@ export function Navbar() {
   );
 }
 
-function MenuItem({
+function DropdownItem({
   href, icon: Icon, label,
-}: {
-  href: string;
-  icon: React.ElementType;
-  label: string;
-}) {
+}: { href: string; icon: React.ElementType; label: string }) {
   return (
     <Link
       href={href}

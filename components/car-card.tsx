@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Heart, Shield, Gauge, Fuel, MapPin, Settings2, Banknote } from "lucide-react";
 import type { Car } from "@/types";
 import { formatPrice, formatMileage, cn } from "@/lib/utils";
+import { useWishlist, trackRecentlyViewed } from "@/lib/store";
 
 const CONDITION_LABELS: Record<string, string> = {
   new: "New",
@@ -18,27 +19,20 @@ interface Props {
   car: Car;
   priority?: boolean;
   className?: string;
-  wishlistIds?: Set<string>;
-  onWishlistToggle?: (id: string) => void;
 }
 
-export function CarCard({ car, priority, className, wishlistIds, onWishlistToggle }: Props) {
-  const saved = wishlistIds?.has(car.id) ?? false;
+export function CarCard({ car, priority, className }: Props) {
+  const { has, toggle } = useWishlist();
+  const saved = has(car.id);
 
   function handleWishlist(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    onWishlistToggle?.(car.id);
+    toggle(car.id);
   }
 
-  // Track recently viewed in localStorage
   function handleCardClick() {
-    try {
-      const KEY = "agnora_recently_viewed";
-      const stored = JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[];
-      const updated = [car.id, ...stored.filter((id) => id !== car.id)].slice(0, 10);
-      localStorage.setItem(KEY, JSON.stringify(updated));
-    } catch { /* ignore */ }
+    trackRecentlyViewed(car.id);
   }
 
   return (
@@ -70,15 +64,15 @@ export function CarCard({ car, priority, className, wishlistIds, onWishlistToggl
         </div>
       </Link>
 
+      {/* Wishlist — always visible on touch, fades in on hover for pointer devices */}
       <button
         type="button"
         aria-label={saved ? "Remove from saved" : "Save car"}
         onClick={handleWishlist}
         className={cn(
-          // Always visible on touch screens; fades in on hover for pointer devices.
-          "absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full backdrop-blur transition-all hover:scale-110 z-10",
+          "absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full backdrop-blur transition-all active:scale-90 z-10",
           saved
-            ? "bg-accent text-white"
+            ? "bg-accent text-white shadow-lg shadow-accent/30"
             : "bg-white/90 text-neutral-900 md:opacity-0 md:group-hover:opacity-100",
         )}
       >
@@ -86,7 +80,7 @@ export function CarCard({ car, priority, className, wishlistIds, onWishlistToggl
       </button>
 
       <div className="mt-4 space-y-3">
-        <div className="flex items-baseline justify-between gap-3">
+        <div>
           <h3 className="font-display text-lg font-medium leading-tight tracking-tight">
             <Link href={`/cars/${car.slug}`} className="hover:text-accent transition-colors" onClick={handleCardClick}>
               {car.year} {car.make} {car.model}

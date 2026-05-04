@@ -9,6 +9,8 @@ import {
   CheckIcon, Heart, Clock, ChevronRight, Banknote,
 } from "lucide-react";
 import { cn, formatPrice } from "@/lib/utils";
+import { useWishlist } from "@/lib/store";
+import { getRecentlyViewedIds } from "@/lib/store";
 import type { Car } from "@/types";
 
 const MAKES = [
@@ -35,55 +37,34 @@ const SORT_OPTIONS = [
 ];
 const PAGE_SIZE = 12;
 
+const STAGGER = [
+  "",
+  "[animation-delay:40ms]",
+  "[animation-delay:80ms]",
+  "[animation-delay:120ms]",
+  "[animation-delay:160ms]",
+  "[animation-delay:200ms]",
+  "[animation-delay:240ms]",
+  "[animation-delay:280ms]",
+  "[animation-delay:320ms]",
+  "[animation-delay:360ms]",
+  "[animation-delay:400ms]",
+  "[animation-delay:440ms]",
+];
+
 interface Props { allCars: Car[] }
 
-// ── Wishlist helpers (localStorage) ──────────────────────────
-function useWishlist() {
-  const KEY = "agnora_wishlist";
-  const [ids, setIds] = useState<Set<string>>(new Set());
-
-  useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[];
-      setIds(new Set(stored));
-    } catch { /* ignore */ }
-  }, []);
-
-  function toggle(id: string) {
-    setIds((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      localStorage.setItem(KEY, JSON.stringify([...next]));
-      return next;
-    });
-  }
-
-  return { ids, toggle };
-}
-
-// ── Recently viewed (localStorage) ───────────────────────────
 function useRecentlyViewed(allCars: Car[]) {
-  const KEY = "agnora_recently_viewed";
   const [ids, setIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(KEY) ?? "[]") as string[];
-      setIds(stored);
-    } catch { /* ignore */ }
-  }, []);
-
-  const cars = ids
+  useEffect(() => { setIds(getRecentlyViewedIds()); }, []);
+  return ids
     .map((id) => allCars.find((c) => c.id === id))
     .filter(Boolean) as Car[];
-
-  return cars;
 }
 
 function CarsListingInner({ allCars }: Props) {
   const router = useRouter();
   const params = useSearchParams();
-  // Keep a ref to always-current params for use inside debounce closures
   const paramsRef = useRef(params);
   paramsRef.current = params;
 
@@ -92,9 +73,10 @@ function CarsListingInner({ allCars }: Props) {
   const [showWishlist, setShowWishlist] = useState(false);
   const [priceMin, setPriceMin] = useState("");
   const [priceMax, setPriceMax] = useState("");
-  // Local controlled state for text inputs — debounced to URL to prevent focus loss
   const [localQ, setLocalQ] = useState(() => params.get("q") ?? "");
   const [localModel, setLocalModel] = useState(() => params.get("smodel") ?? "");
+
+  // Global wishlist context (replaces local hook)
   const { ids: wishlistIds, toggle: toggleWishlist } = useWishlist();
   const recentlyViewed = useRecentlyViewed(allCars);
 
@@ -117,18 +99,17 @@ function CarsListingInner({ allCars }: Props) {
   const financing   = get("financing") === "1";
   const hirePurchase = get("hire_purchase") === "1";
 
-  // Sync URL → local state when cleared externally (e.g. "Clear all" button)
-  useEffect(() => { setLocalQ(get("q")); },     [get("q")]);
-  useEffect(() => { setLocalModel(get("smodel")); }, [get("smodel")]);
+  useEffect(() => { setLocalQ(get("q")); },     // eslint-disable-next-line react-hooks/exhaustive-deps
+    [get("q")]);
+  useEffect(() => { setLocalModel(get("smodel")); }, // eslint-disable-next-line react-hooks/exhaustive-deps
+    [get("smodel")]);
 
-  // Sync local price inputs from URL on mount
   useEffect(() => {
     if (get("min_price")) setPriceMin(get("min_price"));
     if (get("max_price")) setPriceMax(get("max_price"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounce localQ → URL (400 ms)
   useEffect(() => {
     const t = setTimeout(() => {
       const next = new URLSearchParams(paramsRef.current.toString());
@@ -140,7 +121,6 @@ function CarsListingInner({ allCars }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localQ]);
 
-  // Debounce localModel → URL (400 ms)
   useEffect(() => {
     const t = setTimeout(() => {
       const next = new URLSearchParams(paramsRef.current.toString());
@@ -189,8 +169,6 @@ function CarsListingInner({ allCars }: Props) {
 
   const filtered = useMemo(() => {
     let result = [...allCars];
-
-    // Combine header search bar + sidebar search
     const combinedQ = [q, searchModel].filter(Boolean).join(" ");
     if (combinedQ) {
       result = result.filter((c) =>
@@ -259,11 +237,8 @@ function CarsListingInner({ allCars }: Props) {
     setTimeout(() => setSaveToast(false), 2500);
   }
 
-  // Rendered as a function (not a JSX component) so React never unmounts/remounts
-  // the subtree on re-render — this is what prevents text input focus loss.
   const renderSidebar = () => (
     <>
-      {/* Search */}
       <FilterSection title="Search">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
@@ -277,7 +252,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Price range */}
       <FilterSection title="Price range (KSh)">
         <div className="flex gap-2 items-center">
           <input
@@ -336,7 +310,6 @@ function CarsListingInner({ allCars }: Props) {
         </button>
       </FilterSection>
 
-      {/* Condition */}
       <FilterSection title="Condition">
         <div className="flex flex-wrap gap-1.5">
           {CONDITIONS.map(({ value, label }) => (
@@ -357,7 +330,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Make */}
       <FilterSection title="Make">
         <div className="space-y-1.5 max-h-48 overflow-y-auto">
           {MAKES.map((m) => (
@@ -374,7 +346,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Body type */}
       <FilterSection title="Body type">
         <div className="space-y-1.5">
           {BODY_TYPES.map((b) => (
@@ -391,7 +362,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Fuel */}
       <FilterSection title="Fuel type">
         <div className="space-y-1.5">
           {FUELS.map((f) => (
@@ -408,7 +378,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Transmission */}
       <FilterSection title="Transmission">
         <div className="flex gap-1.5">
           {["auto", "manual"].map((t) => (
@@ -427,7 +396,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Location */}
       <FilterSection title="Location">
         <div className="space-y-1.5">
           {LOCATIONS.map((l) => (
@@ -444,7 +412,6 @@ function CarsListingInner({ allCars }: Props) {
         </div>
       </FilterSection>
 
-      {/* Finance options */}
       <FilterSection title="Finance options">
         <label className="flex items-center gap-2.5 cursor-pointer group">
           <input
@@ -481,292 +448,323 @@ function CarsListingInner({ allCars }: Props) {
   );
 
   return (
-    <div className="container max-w-container py-8 lg:py-12">
-
-      {/* ── Advanced search bar ── */}
-      <div className="mb-8 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row">
-          {/* Make dropdown */}
-          <div className="relative sm:w-44">
-            <select
-              value={searchMake}
-              onChange={(e) => setParam("smake", e.target.value || null)}
-              aria-label="Select make"
-              className="w-full h-11 appearance-none rounded-xl border border-border bg-surface-2 pl-4 pr-8 text-sm outline-none focus:border-accent cursor-pointer"
-            >
-              <option value="">All makes</option>
-              {MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
-          </div>
-
-          {/* Model (free-type) */}
-          <input
-            value={localModel}
-            onChange={(e) => setLocalModel(e.target.value)}
-            placeholder="Model (e.g. Harrier, CX-5…)"
-            aria-label="Model"
-            className="sm:w-44 h-11 rounded-xl border border-border bg-surface-2 px-4 text-sm outline-none focus:border-accent placeholder:text-muted"
-          />
-
-          {/* Free text search */}
+    <div className="container max-w-container">
+      {/* ── Sticky mobile search bar ─────────────────────────────
+          Sits just below the top navbar (top-16 = 4rem = 64px).
+          Full-width bleed achieved with -mx-5 px-5 on mobile. ── */}
+      <div className="lg:hidden sticky top-16 z-30 -mx-5 px-5 py-3 bg-background/95 backdrop-blur-md border-b border-border">
+        <div className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
             <input
               value={localQ}
               onChange={(e) => setLocalQ(e.target.value)}
-              placeholder="Search by keyword, year, trim…"
-              aria-label="Free text search"
-              className="w-full h-11 rounded-xl border border-border bg-surface-2 pl-10 pr-4 text-sm outline-none focus:border-accent placeholder:text-muted"
+              placeholder="Search make, model…"
+              aria-label="Search cars"
+              className="w-full h-11 rounded-full border border-border bg-surface-2 pl-10 pr-4 text-sm outline-none focus:border-accent placeholder:text-muted"
             />
-          </div>
-
-          {/* Condition quick filter */}
-          <div className="relative sm:w-44">
-            <select
-              value={condition}
-              onChange={(e) => setParam("condition", e.target.value || null)}
-              aria-label="Condition"
-              className="w-full h-11 appearance-none rounded-xl border border-border bg-surface-2 pl-4 pr-8 text-sm outline-none focus:border-accent cursor-pointer"
-            >
-              {CONDITIONS.map(({ value, label }) => (
-                <option key={value} value={value === "all" ? "" : value}>{label}</option>
-              ))}
-            </select>
-            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
-          </div>
-        </div>
-      </div>
-
-      {/* ── Header ── */}
-      <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="font-display text-3xl font-medium">Cars for sale</h1>
-          <p className="text-sm text-muted mt-1">
-            {filtered.length.toLocaleString()} {filtered.length === 1 ? "car" : "cars"} found
-          </p>
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setShowWishlist((v) => !v)}
-            className={cn(
-              "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors",
-              showWishlist ? "border-accent bg-accent-soft text-accent" : "border-border hover:bg-surface-2",
+            {localQ && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setLocalQ("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
             )}
-          >
-            <Heart className={cn("h-4 w-4", showWishlist && "fill-accent")} />
-            Saved{wishlistIds.size > 0 && ` (${wishlistIds.size})`}
-          </button>
-          <button
-            type="button"
-            onClick={saveSearch}
-            className="inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors"
-          >
-            {saveToast ? <CheckIcon className="h-4 w-4 text-green-500" /> : <BookmarkPlus className="h-4 w-4" />}
-            {saveToast ? "Saved!" : "Save search"}
-          </button>
+          </div>
           <button
             type="button"
             onClick={() => setSidebarOpen(true)}
-            className="lg:hidden inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors"
+            aria-label="Open filters"
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 h-11 rounded-full border px-4 text-sm font-medium transition-colors",
+              activeFilters.length > 0
+                ? "border-accent bg-accent-soft text-accent"
+                : "border-border bg-surface-2",
+            )}
           >
             <SlidersHorizontal className="h-4 w-4" />
-            Filters
-            {activeFilters.length > 0 && (
-              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white text-[10px] font-bold">
-                {activeFilters.length}
-              </span>
-            )}
+            {activeFilters.length > 0 ? activeFilters.length : ""}
           </button>
         </div>
       </div>
 
-      {/* ── Wishlist panel ── */}
-      {showWishlist && (
-        <div className="mb-6 rounded-2xl border border-accent/30 bg-accent-soft/20 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold flex items-center gap-2">
-              <Heart className="h-4 w-4 text-accent fill-accent" /> Saved cars
+      <div className="py-6 lg:py-12">
+        {/* ── Desktop full advanced search bar ── */}
+        <div className="hidden lg:block mb-8 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="relative sm:w-44">
+              <select
+                value={searchMake}
+                onChange={(e) => setParam("smake", e.target.value || null)}
+                aria-label="Select make"
+                className="w-full h-11 appearance-none rounded-xl border border-border bg-surface-2 pl-4 pr-8 text-sm outline-none focus:border-accent cursor-pointer"
+              >
+                <option value="">All makes</option>
+                {MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
+            </div>
+
+            <input
+              value={localModel}
+              onChange={(e) => setLocalModel(e.target.value)}
+              placeholder="Model (e.g. Harrier, CX-5…)"
+              aria-label="Model"
+              className="sm:w-44 h-11 rounded-xl border border-border bg-surface-2 px-4 text-sm outline-none focus:border-accent placeholder:text-muted"
+            />
+
+            <div className="relative flex-1">
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+              <input
+                value={localQ}
+                onChange={(e) => setLocalQ(e.target.value)}
+                placeholder="Search by keyword, year, trim…"
+                aria-label="Free text search"
+                className="w-full h-11 rounded-xl border border-border bg-surface-2 pl-10 pr-4 text-sm outline-none focus:border-accent placeholder:text-muted"
+              />
+            </div>
+
+            <div className="relative sm:w-44">
+              <select
+                value={condition}
+                onChange={(e) => setParam("condition", e.target.value || null)}
+                aria-label="Condition"
+                className="w-full h-11 appearance-none rounded-xl border border-border bg-surface-2 pl-4 pr-8 text-sm outline-none focus:border-accent cursor-pointer"
+              >
+                {CONDITIONS.map(({ value, label }) => (
+                  <option key={value} value={value === "all" ? "" : value}>{label}</option>
+                ))}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted" />
+            </div>
+          </div>
+        </div>
+
+        {/* ── Header ── */}
+        <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="font-display text-3xl font-medium">Cars for sale</h1>
+            <p className="text-sm text-muted mt-1">
+              {filtered.length.toLocaleString()} {filtered.length === 1 ? "car" : "cars"} found
             </p>
-            <button type="button" aria-label="Close saved cars" onClick={() => setShowWishlist(false)} className="text-muted hover:text-foreground">
-              <X className="h-4 w-4" />
-            </button>
           </div>
-          {wishlistCars.length === 0 ? (
-            <p className="text-sm text-muted">No saved cars yet. Click the heart icon on a car to save it.</p>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {wishlistCars.map((car) => (
-                <CarCard key={car.id} car={car} wishlistIds={wishlistIds} onWishlistToggle={toggleWishlist} />
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── Active filter pills ── */}
-      {activeFilters.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-6">
-          {activeFilters.map(({ label, clear }) => (
+          <div className="flex gap-2 flex-wrap">
             <button
-              key={label}
               type="button"
-              onClick={clear}
-              className="flex items-center gap-1.5 h-7 rounded-full border border-border bg-surface-2 px-3 text-xs font-medium hover:border-accent/50 hover:bg-accent-soft transition-all"
+              onClick={() => setShowWishlist((v) => !v)}
+              className={cn(
+                "inline-flex h-10 items-center gap-2 rounded-full border px-4 text-sm font-medium transition-colors",
+                showWishlist ? "border-accent bg-accent-soft text-accent" : "border-border hover:bg-surface-2",
+              )}
             >
-              {label} <X className="h-3 w-3" />
+              <Heart className={cn("h-4 w-4", showWishlist && "fill-accent")} />
+              Saved{wishlistIds.size > 0 && ` (${wishlistIds.size})`}
             </button>
-          ))}
-          <button
-            type="button"
-            onClick={clearAll}
-            className="h-7 rounded-full px-3 text-xs text-muted hover:text-foreground transition-colors"
-          >
-            Clear all
-          </button>
-        </div>
-      )}
-
-      <div className="flex gap-6">
-        {/* ── Sidebar filters (desktop) ── */}
-        <aside className="hidden lg:block w-60 shrink-0 space-y-5">
-          {renderSidebar()}
-        </aside>
-
-        {/* ── Main grid ── */}
-        <div className="flex-1 min-w-0">
-          {/* Sort */}
-          <div className="flex items-center justify-end mb-5">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted hidden sm:block">Sort:</span>
-              <div className="relative">
-                <select
-                  value={sort}
-                  onChange={(e) => setParam("sort", e.target.value)}
-                  aria-label="Sort by"
-                  className="h-9 appearance-none rounded-xl border border-border bg-surface-2 pl-3 pr-8 text-sm outline-none focus:border-accent cursor-pointer"
-                >
-                  {SORT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted pointer-events-none" />
-              </div>
-            </div>
+            <button
+              type="button"
+              onClick={saveSearch}
+              className="inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors"
+            >
+              {saveToast ? <CheckIcon className="h-4 w-4 text-green-500" /> : <BookmarkPlus className="h-4 w-4" />}
+              {saveToast ? "Saved!" : "Save search"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden inline-flex h-10 items-center gap-2 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filters
+              {activeFilters.length > 0 && (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white text-[10px] font-bold">
+                  {activeFilters.length}
+                </span>
+              )}
+            </button>
           </div>
+        </div>
 
-          {/* Empty state */}
-          {allCars.length === 0 ? (
-            <div className="flex flex-col items-center py-24 text-center">
-              <div className="mb-6 h-24 w-24 rounded-full bg-surface-2 flex items-center justify-center">
-                <svg className="h-12 w-12 text-muted/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V9a2 2 0 012-2h1l2-3h8l2 3h1a2 2 0 012 2v6a2 2 0 01-2 2h-3m-6 0h6m-3 0v0" />
-                </svg>
-              </div>
-              <h2 className="font-display text-2xl font-medium mb-2">No cars available yet</h2>
-              <p className="text-muted mb-6 max-w-sm">Be the first to list. Join as a dealer and start uploading cars to reach thousands of buyers across Kenya.</p>
-              <a
-                href="/dealer/register"
-                className="inline-flex h-11 items-center gap-2 rounded-full bg-accent text-white px-7 text-sm font-semibold hover:opacity-90 transition-opacity"
-              >
-                List your first car <ChevronRight className="h-4 w-4" />
-              </a>
-            </div>
-          ) : paginated.length === 0 ? (
-            <div className="flex flex-col items-center py-20 text-center">
-              <svg className="mb-5 h-20 w-20 text-muted/20" viewBox="0 0 96 96" fill="none" aria-hidden>
-                <circle cx="40" cy="40" r="28" stroke="currentColor" strokeWidth="4" />
-                <path d="M60 60 L80 80" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
-                <path d="M32 40h16M40 32v16" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-              </svg>
-              <h2 className="font-display text-xl font-medium mb-2">No cars match your filters</h2>
-              <p className="text-sm text-muted mb-6">Try adjusting or clearing your filters</p>
-              <button
-                type="button"
-                onClick={clearAll}
-                className="h-10 rounded-full border border-border px-6 text-sm font-medium hover:bg-surface-2 transition-colors"
-              >
-                Clear all filters
+        {/* ── Wishlist panel ── */}
+        {showWishlist && (
+          <div className="mb-6 rounded-2xl border border-accent/30 bg-accent-soft/20 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm font-semibold flex items-center gap-2">
+                <Heart className="h-4 w-4 text-accent fill-accent" /> Saved cars
+              </p>
+              <button type="button" aria-label="Close saved cars" onClick={() => setShowWishlist(false)} className="text-muted hover:text-foreground">
+                <X className="h-4 w-4" />
               </button>
             </div>
-          ) : (
-            <>
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-                {paginated.map((car, i) => (
-                  <div
-                    key={car.id}
-                    className={cn("animate-fade-up", i === 0 && "[animation-delay:0ms]")}
-                    style={{ animationDelay: `${i * 40}ms` } as React.CSSProperties}
-                  >
-                    <CarCard
-                      car={car}
-                      priority={i < 3}
-                      wishlistIds={wishlistIds}
-                      onWishlistToggle={toggleWishlist}
-                    />
-                  </div>
+            {wishlistCars.length === 0 ? (
+              <p className="text-sm text-muted">No saved cars yet. Tap the heart on a car to save it.</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {wishlistCars.map((car) => (
+                  <CarCard key={car.id} car={car} />
                 ))}
               </div>
+            )}
+          </div>
+        )}
 
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="mt-10 flex items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    disabled={page <= 1}
-                    onClick={() => setParam("page", String(page - 1))}
-                    className="h-9 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors disabled:opacity-40"
+        {/* ── Active filter pills ── */}
+        {activeFilters.length > 0 && (
+          <div className="flex flex-wrap gap-2 mb-6">
+            {activeFilters.map(({ label, clear }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={clear}
+                className="flex items-center gap-1.5 h-7 rounded-full border border-border bg-surface-2 px-3 text-xs font-medium hover:border-accent/50 hover:bg-accent-soft transition-all"
+              >
+                {label} <X className="h-3 w-3" />
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={clearAll}
+              className="h-7 rounded-full px-3 text-xs text-muted hover:text-foreground transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
+
+        <div className="flex gap-6">
+          {/* ── Sidebar filters (desktop) ── */}
+          <aside className="hidden lg:block w-60 shrink-0 space-y-5">
+            {renderSidebar()}
+          </aside>
+
+          {/* ── Main grid ── */}
+          <div className="flex-1 min-w-0">
+            {/* Sort */}
+            <div className="flex items-center justify-end mb-5">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-muted hidden sm:block">Sort:</span>
+                <div className="relative">
+                  <select
+                    value={sort}
+                    onChange={(e) => setParam("sort", e.target.value)}
+                    aria-label="Sort by"
+                    className="h-9 appearance-none rounded-xl border border-border bg-surface-2 pl-3 pr-8 text-sm outline-none focus:border-accent cursor-pointer"
                   >
-                    Previous
-                  </button>
-                  {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
-                    const p = i + 1;
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setParam("page", String(p))}
-                        className={cn(
-                          "h-9 w-9 rounded-full text-sm font-medium transition-all",
-                          p === page ? "bg-accent text-white" : "border border-border hover:bg-surface-2",
-                        )}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
-                  <button
-                    type="button"
-                    disabled={page >= totalPages}
-                    onClick={() => setParam("page", String(page + 1))}
-                    className="h-9 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors disabled:opacity-40"
-                  >
-                    Next
-                  </button>
+                    {SORT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted pointer-events-none" />
                 </div>
-              )}
-            </>
-          )}
-
-          {/* Recently viewed */}
-          {recentlyViewed.length > 0 && (
-            <div className="mt-14">
-              <div className="flex items-center gap-2 mb-5">
-                <Clock className="h-4 w-4 text-muted" />
-                <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">Recently viewed</h2>
-              </div>
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {recentlyViewed.slice(0, 3).map((car) => (
-                  <CarCard key={car.id} car={car} wishlistIds={wishlistIds} onWishlistToggle={toggleWishlist} />
-                ))}
               </div>
             </div>
-          )}
+
+            {allCars.length === 0 ? (
+              <div className="flex flex-col items-center py-24 text-center">
+                <div className="mb-6 h-24 w-24 rounded-full bg-surface-2 flex items-center justify-center">
+                  <svg className="h-12 w-12 text-muted/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V9a2 2 0 012-2h1l2-3h8l2 3h1a2 2 0 012 2v6a2 2 0 01-2 2h-3m-6 0h6m-3 0v0" />
+                  </svg>
+                </div>
+                <h2 className="font-display text-2xl font-medium mb-2">No cars available yet</h2>
+                <p className="text-muted mb-6 max-w-sm">Be the first to list. Join as a dealer and start uploading cars to reach thousands of buyers across Kenya.</p>
+                <a
+                  href="/dealer/register"
+                  className="inline-flex h-11 items-center gap-2 rounded-full bg-accent text-white px-7 text-sm font-semibold hover:opacity-90 transition-opacity"
+                >
+                  List your first car <ChevronRight className="h-4 w-4" />
+                </a>
+              </div>
+            ) : paginated.length === 0 ? (
+              <div className="flex flex-col items-center py-20 text-center">
+                <svg className="mb-5 h-20 w-20 text-muted/20" viewBox="0 0 96 96" fill="none" aria-hidden>
+                  <circle cx="40" cy="40" r="28" stroke="currentColor" strokeWidth="4" />
+                  <path d="M60 60 L80 80" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
+                  <path d="M32 40h16M40 32v16" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+                </svg>
+                <h2 className="font-display text-xl font-medium mb-2">No cars match your filters</h2>
+                <p className="text-sm text-muted mb-6">Try adjusting or clearing your filters</p>
+                <button
+                  type="button"
+                  onClick={clearAll}
+                  className="h-10 rounded-full border border-border px-6 text-sm font-medium hover:bg-surface-2 transition-colors"
+                >
+                  Clear all filters
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* 1 column on mobile, 2 on sm, 3 on lg */}
+                <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                  {paginated.map((car, i) => (
+                    <div
+                      key={car.id}
+                      className={cn("animate-fade-up", STAGGER[i] ?? "")}
+                    >
+                      <CarCard car={car} priority={i < 3} />
+                    </div>
+                  ))}
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="mt-10 flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      disabled={page <= 1}
+                      onClick={() => setParam("page", String(page - 1))}
+                      className="h-9 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors disabled:opacity-40"
+                    >
+                      Previous
+                    </button>
+                    {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                      const p = i + 1;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setParam("page", String(p))}
+                          className={cn(
+                            "h-9 w-9 rounded-full text-sm font-medium transition-all",
+                            p === page ? "bg-accent text-white" : "border border-border hover:bg-surface-2",
+                          )}
+                        >
+                          {p}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      disabled={page >= totalPages}
+                      onClick={() => setParam("page", String(page + 1))}
+                      className="h-9 rounded-full border border-border px-4 text-sm font-medium hover:bg-surface-2 transition-colors disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+
+            {recentlyViewed.length > 0 && (
+              <div className="mt-14">
+                <div className="flex items-center gap-2 mb-5">
+                  <Clock className="h-4 w-4 text-muted" />
+                  <h2 className="text-sm font-semibold uppercase tracking-wider text-muted">Recently viewed</h2>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {recentlyViewed.slice(0, 3).map((car) => (
+                    <CarCard key={car.id} car={car} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* ── Mobile filter sheet ── */}
+      {/* ── Mobile filter bottom sheet ── */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
@@ -812,7 +810,7 @@ export function CarsListing({ allCars }: Props) {
   return (
     <Suspense fallback={
       <div className="container max-w-container py-12">
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       </div>

@@ -25,10 +25,22 @@
   }
 
   * { @apply border-border; }
-  html { color-scheme: light dark; }
+  html {
+    color-scheme: light dark;
+    scroll-behavior: smooth;
+    overflow-x: hidden;
+    /* CSS-level zoom lock — backs up the viewport meta on iOS Safari
+       and Android WebView which can ignore user-scalable=no.
+       pan-x pan-y = normal scrolling; pinch-zoom is NOT in the list
+       so the browser will not handle it. */
+    touch-action: pan-x pan-y;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1;
+    overflow-x: hidden;
+    width: 100%;
+    touch-action: pan-x pan-y;
   }
   ::selection { background: rgb(var(--accent) / 0.3); }
 

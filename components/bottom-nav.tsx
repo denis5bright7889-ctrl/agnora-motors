@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Home, Car, PlusCircle, BookOpen, User } from "lucide-react";
+import { Home, Car, PlusCircle, BookOpen, User, Banknote } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { useWishlist } from "@/lib/store";
 
 type NavItem = {
   href: string;
@@ -14,23 +16,30 @@ type NavItem = {
 };
 
 const BASE_ITEMS: NavItem[] = [
-  { href: "/",         icon: Home,       label: "Home" },
-  { href: "/cars",     icon: Car,        label: "Cars" },
+  { href: "/",         icon: Home,      label: "Home" },
+  { href: "/cars",     icon: Car,       label: "Buy" },
   { href: "/sell",     icon: PlusCircle, label: "Sell", accent: true },
-  { href: "/research", icon: BookOpen,   label: "Research" },
+  { href: "/finance",  icon: Banknote,  label: "Finance" },
+  { href: "/research", icon: BookOpen,  label: "Research" },
 ];
 
-// Pages that have their own dedicated navigation — hide the global bottom nav.
 const HIDDEN_ON = ["/admin", "/dealer", "/login", "/register"];
 
 export function BottomNav() {
   const pathname  = usePathname();
   const { data: session } = useSession();
+  const { count: wishlistCount } = useWishlist();
 
   if (HIDDEN_ON.some((p) => pathname?.startsWith(p))) return null;
 
   const profileItem: NavItem = {
-    href:  session ? (session.user.role === "admin" ? "/admin" : "/dealer/dashboard") : "/login",
+    href: session
+      ? session.user.role === "admin"
+        ? "/admin"
+        : session.user.role === "dealer"
+          ? "/dealer/dashboard"
+          : "/login"
+      : "/login",
     icon:  User,
     label: session ? "Account" : "Sign in",
   };
@@ -42,10 +51,7 @@ export function BottomNav() {
       aria-label="Mobile navigation"
       className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur-md"
     >
-      <div
-        className="grid grid-cols-5"
-        style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
-      >
+      <div className="grid grid-cols-6 pb-safe">
         {items.map(({ href, icon: Icon, label, accent }) => {
           const active =
             pathname === href ||
@@ -56,11 +62,10 @@ export function BottomNav() {
               <Link
                 key={href}
                 href={href}
-                className="flex flex-col items-center gap-0.5 pt-1 pb-2 text-[10px] font-semibold text-accent"
                 aria-label={label}
+                className="flex flex-col items-center gap-0.5 pt-1 pb-2 text-[9px] font-semibold text-accent"
               >
-                {/* Raised pill button for primary action */}
-                <span className="flex h-11 w-11 -mt-4 items-center justify-center rounded-full bg-accent text-white shadow-lg shadow-accent/40 transition-transform active:scale-95">
+                <span className="flex h-10 w-10 -mt-4 items-center justify-center rounded-full bg-accent text-white shadow-lg shadow-accent/40 transition-transform active:scale-90">
                   <Icon className="h-5 w-5" />
                 </span>
                 {label}
@@ -68,23 +73,38 @@ export function BottomNav() {
             );
           }
 
+          const isCars = href === "/cars" && wishlistCount > 0;
+
           return (
             <Link
               key={href}
               href={href}
-              className={cn(
-                "flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors active:scale-95",
-                active ? "text-accent" : "text-muted",
-              )}
               aria-label={label}
               aria-current={active ? "page" : undefined}
+              className={cn(
+                "flex flex-col items-center gap-0.5 py-2.5 text-[9px] font-medium transition-colors active:scale-90",
+                active ? "text-accent" : "text-muted",
+              )}
             >
-              <Icon
-                className={cn(
-                  "h-5 w-5 transition-all",
-                  active && "stroke-[2.5]",
+              <div className="relative">
+                <Icon className={cn("h-5 w-5 transition-all", active && "stroke-[2.5]")} />
+
+                {/* Active dot indicator (animates between tabs) */}
+                {active && !accent && (
+                  <motion.span
+                    layoutId="nav-active-dot"
+                    className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-[3px] w-[14px] rounded-full bg-accent"
+                    transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                  />
                 )}
-              />
+
+                {/* Wishlist badge on Buy tab */}
+                {isCars && (
+                  <span className="absolute -right-1.5 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-white text-[8px] font-bold">
+                    {wishlistCount > 9 ? "9+" : wishlistCount}
+                  </span>
+                )}
+              </div>
               {label}
             </Link>
           );
