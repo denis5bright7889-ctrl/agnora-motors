@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { getUserByEmail, createUser, isDbConfigured } from "@/lib/db";
 import { findLocalUser, createLocalUser } from "@/lib/local-users";
+import { Resend } from "resend";
 
 export const runtime = "nodejs";
 

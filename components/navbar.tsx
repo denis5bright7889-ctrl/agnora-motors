@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import {
-  Menu, X, ChevronDown, LayoutDashboard, ShieldCheck,
-  LogOut, User, Search, Banknote,
+  ChevronDown, LayoutDashboard, ShieldCheck,
+  LogOut, User,
 } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
@@ -19,25 +19,16 @@ const NAV_LINKS = [
 ];
 
 export function Navbar() {
-  const [open, setOpen] = useState(false);
+  // Mobile menu state removed; navigation is handled via BottomNav
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const pathname = usePathname();
   const { data: session } = useSession();
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close mobile drawer on navigation
-  useEffect(() => { setOpen(false); }, [pathname]);
-
-  // Lock body scroll when mobile drawer is open
-  useEffect(() => {
-    document.body.style.overflow = open ? "hidden" : "";
-    return () => { document.body.style.overflow = ""; };
-  }, [open]);
-
   // Escape key + outside-click close both menus
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") { setOpen(false); setUserMenuOpen(false); }
+      if (e.key === "Escape") { setUserMenuOpen(false); }
     }
     function onClickOutside(e: MouseEvent) {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
@@ -151,134 +142,6 @@ export function Navbar() {
             </Link>
           )}
 
-          {/* Mobile: search shortcut */}
-          <Link
-            href="/cars"
-            aria-label="Search cars"
-            className="md:hidden h-10 w-10 inline-flex items-center justify-center rounded-full bg-surface-2 border border-border"
-          >
-            <Search className="h-4 w-4" />
-          </Link>
-
-          {/* Mobile: hamburger */}
-          <button
-            type="button"
-            className="md:hidden h-10 w-10 inline-flex items-center justify-center rounded-full bg-surface-2 border border-border"
-            onClick={() => setOpen((v) => !v)}
-            aria-label={open ? "Close menu" : "Open menu"}
-            aria-expanded={open}
-          >
-            {open ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Mobile drawer ── */}
-      <div
-        className={cn(
-          "md:hidden fixed inset-0 top-16 z-40 bg-background transition-opacity duration-200",
-          open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none",
-        )}
-        aria-hidden={!open}
-      >
-        <div className="container max-w-container py-5 h-full overflow-y-auto pb-safe">
-          <nav className="flex flex-col gap-1" aria-label="Mobile">
-
-            {/* Signed-in user card */}
-            {session && (
-              <div className="mb-3 flex items-center gap-3 rounded-2xl bg-surface-2 px-4 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-white text-sm font-semibold">
-                  {(session.user.name ?? session.user.email ?? "U")[0].toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold truncate">
-                    {session.user.name ?? "My account"}
-                  </p>
-                  <p className="text-xs text-muted truncate">{session.user.email}</p>
-                </div>
-                <span className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
-                  isAdmin  ? "bg-accent-soft text-accent" :
-                  isDealer ? "bg-blue-500/15 text-blue-500" :
-                             "bg-surface text-muted border border-border",
-                )}>
-                  {role}
-                </span>
-              </div>
-            )}
-
-            {/* Main nav links */}
-            {NAV_LINKS.map((l) => {
-              const active =
-                pathname === l.href ||
-                (l.href !== "/" && pathname?.startsWith(l.href.split("#")[0]));
-              const Icon = l.href === "/finance" ? Banknote : undefined;
-              return (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={cn(
-                    "flex h-12 items-center gap-3 rounded-2xl px-4 text-base transition-colors",
-                    active
-                      ? "bg-accent-soft text-accent font-medium"
-                      : "hover:bg-surface-2",
-                  )}
-                >
-                  {Icon && <Icon className="h-5 w-5 text-accent" />}
-                  {l.label}
-                </Link>
-              );
-            })}
-
-            {/* Role-specific links */}
-            {session && (
-              <>
-                {isAdmin && (
-                  <Link
-                    href="/admin"
-                    className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors"
-                  >
-                    <ShieldCheck className="h-5 w-5 text-accent" /> Admin panel
-                  </Link>
-                )}
-                {(isAdmin || isDealer) && (
-                  <Link
-                    href="/dealer/dashboard"
-                    className="flex h-12 items-center gap-3 rounded-2xl px-4 text-base hover:bg-surface-2 transition-colors"
-                  >
-                    <LayoutDashboard className="h-5 w-5" /> Dealer dashboard
-                  </Link>
-                )}
-              </>
-            )}
-
-            {/* Auth actions */}
-            {session ? (
-              <button
-                type="button"
-                onClick={() => signOut({ callbackUrl: "/" })}
-                className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-full border border-border text-sm font-medium text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-              >
-                <LogOut className="h-4 w-4" />
-                Sign out
-              </button>
-            ) : (
-              <div className="mt-4 flex flex-col gap-2">
-                <Link
-                  href="/login"
-                  className="flex h-12 items-center justify-center rounded-full bg-foreground text-background text-sm font-medium hover:opacity-90 transition-opacity"
-                >
-                  Sign in
-                </Link>
-                <Link
-                  href="/register"
-                  className="flex h-12 items-center justify-center rounded-full border border-border text-sm font-medium hover:bg-surface-2 transition-colors"
-                >
-                  Create account
-                </Link>
-              </div>
-            )}
-          </nav>
         </div>
       </div>
     </header>

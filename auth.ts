@@ -12,6 +12,7 @@ declare module "next-auth" {
     user: {
       id: string;
       role: string;
+      emailVerified: Date | null;
     } & DefaultSession["user"];
   }
   interface User {
@@ -100,11 +101,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           const valid = await bcrypt.compare(password, user.passwordHash);
           console.log("[authorize] db email=%s valid=%s", email, valid);
           if (!valid) return null;
+
           return {
             id:    user.id,
             email: user.email,
             name:  user.name  ?? undefined,
-            image: user.image ?? undefined,
+            emailVerified: (user as any).emailVerified ?? null,
             role:  user.role,
           };
         } catch (err) {
@@ -134,7 +136,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           (user as { role?: string }).role ?? "buyer",
         );
         token.id   = user.id;
-        token.role = (user as { role?: string }).role ?? "buyer";
+        token.role = (user as { role?: string }).role ?? "private_seller";
+        token.emailVerified = (user as any).emailVerified ?? null;
       }
 
       // Branch B: Google first sign-in → upsert user into our DB
@@ -170,7 +173,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             err instanceof Error ? err.message : String(err),
           );
           if (!token.id)   token.id   = token.sub;
-          if (!token.role) token.role = "buyer";
+          if (!token.role) token.role = "private_seller";
         }
       }
 
@@ -179,7 +182,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
     session({ session, token }) {
       session.user.id   = (token.id ?? token.sub) as string;
-      session.user.role = (token.role as string | undefined) ?? "buyer";
+      session.user.role = (token.role as string | undefined) ?? "private_seller";
+      session.user.emailVerified = (token.emailVerified as Date | null) ?? null;
+
       console.log("[session] built id=%s role=%s email=%s",
         session.user.id, session.user.role, session.user.email,
       );

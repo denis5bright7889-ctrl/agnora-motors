@@ -1,35 +1,30 @@
-import NextAuth from "next-auth";
-import { authConfig } from "./auth.config";
+import { auth } from "@/auth";
 import { NextResponse } from "next/server";
 
-// Use the Edge-compatible config only — no Node.js modules imported here.
-const { auth } = NextAuth(authConfig);
-
 export default auth((req) => {
-  const { pathname } = req.nextUrl;
-  const session = req.auth;
-  const role = session?.user?.role;
+  const isLoggedIn = !!req.auth;
+  const role = req.auth?.user?.role;
+  const isVerified = !!req.auth?.user?.emailVerified;
+  const { nextUrl } = req;
 
-  // ── Admin routes ──────────────────────────────────────────
-  if (pathname.startsWith("/admin")) {
-    if (!session) {
-      return NextResponse.redirect(new URL("/login?next=/admin", req.url));
-    }
-    if (role !== "admin") {
-      return NextResponse.redirect(new URL("/", req.url));
-    }
-  }
+  // 1. Protect Dashboard Routes
+  const isPrivateDash = nextUrl.pathname.startsWith("/private-dashboard");
+  const isDealerDash = nextUrl.pathname.startsWith("/dealer-dashboard");
 
-  // ── Dealer routes ─────────────────────────────────────────
-  if (
-    pathname.startsWith("/dealer/dashboard") ||
-    pathname.startsWith("/dealer/listings")
-  ) {
-    if (!session) {
-      return NextResponse.redirect(new URL("/login?next=" + pathname, req.url));
+  if (isPrivateDash || isDealerDash) {
+    if (!isLoggedIn) return NextResponse.redirect(new URL("/login", nextUrl));
+    
+    // 2. Block unverified users (except from verification page)
+    if (!isVerified && nextUrl.pathname !== "/verify-email") {
+      return NextResponse.redirect(new URL("/verify-email", nextUrl));
     }
-    if (role !== "dealer" && role !== "admin") {
-      return NextResponse.redirect(new URL("/dealer/pending", req.url));
+
+    // 3. Enforce Role Access
+    if (isPrivateDash && role !== "private_seller" && role !== "admin") {
+      return NextResponse.redirect(new URL("/dealer-dashboard", nextUrl));
+    }
+    if (isDealerDash && role !== "dealer" && role !== "admin") {
+      return NextResponse.redirect(new URL("/private-dashboard", nextUrl));
     }
   }
 
@@ -37,5 +32,5 @@ export default auth((req) => {
 });
 
 export const config = {
-  matcher: ["/admin/:path*", "/dealer/dashboard/:path*", "/dealer/listings/:path*"],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
