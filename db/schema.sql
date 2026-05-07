@@ -174,7 +174,12 @@ CREATE TABLE IF NOT EXISTS subscriptions (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Email verification ───────────────────────────────────────────────────────
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified         BOOLEAN     NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code      TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMPTZ;
+
 -- Seed admin (update email/password after running)
-INSERT INTO users (id, email, name, role)
-VALUES ('admin-seed-id', 'admin@agnora.co.ke', 'Admin', 'admin')
-ON CONFLICT (email) DO UPDATE SET role = 'admin';
+INSERT INTO users (id, email, name, role, email_verified)
+VALUES ('admin-seed-id', 'admin@agnora.co.ke', 'Admin', 'admin', TRUE)
+ON CONFLICT (email) DO UPDATE SET role = 'admin', email_verified = TRUE;

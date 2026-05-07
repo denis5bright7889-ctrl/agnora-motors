@@ -352,14 +352,15 @@ interface Lender {
   rate: string;
   maxLoan: string;
   contact: string;
+  applyUrl?: string;
 }
 
 const BANKS: Lender[] = [
-  { name: "Equity Bank",    rate: "13–16% p.a.", maxLoan: "80% of value", contact: "0763 000 000" },
-  { name: "KCB Bank",       rate: "13–15% p.a.", maxLoan: "80% of value", contact: "0711 087 000" },
+  { name: "Equity Bank",    rate: "13–16% p.a.", maxLoan: "80% of value", contact: "0763 000 000", applyUrl: "https://equitygroupholdings.com/ke/personal/loans/auto-loan/" },
+  { name: "KCB Bank",       rate: "13–15% p.a.", maxLoan: "80% of value", contact: "0711 087 000", applyUrl: "https://ke.kcbgroup.com/personal/borrow/personal-loans" },
   { name: "Stanbic Bank",   rate: "14–17% p.a.", maxLoan: "75% of value", contact: "0703 085 000" },
-  { name: "NCBA Bank",      rate: "14–16% p.a.", maxLoan: "75% of value", contact: "0711 056 444" },
-  { name: "Absa Kenya",     rate: "15–18% p.a.", maxLoan: "70% of value", contact: "0709 116 000" },
+  { name: "NCBA Bank",      rate: "14–16% p.a.", maxLoan: "75% of value", contact: "0711 056 444", applyUrl: "https://ke.ncbagroup.com/personal/loans/asset-finance/" },
+  { name: "Absa Kenya",     rate: "15–18% p.a.", maxLoan: "70% of value", contact: "0709 116 000", applyUrl: "https://www.absa.co.ke/personal/borrow/vehicle-finance/" },
 ];
 
 const SACCOS: Lender[] = [
@@ -386,18 +387,37 @@ function LenderSection({ icon: Icon, title, lenders }: { icon: React.ElementType
       </div>
       <div className="space-y-3">
         {lenders.map((l) => (
-          <div key={l.name} className="rounded-xl border border-border bg-surface-2 p-3">
-            <div className="flex items-start justify-between gap-2 mb-2">
+          <div key={l.name} className="rounded-xl border border-border bg-surface-2 p-3.5">
+            <div className="flex items-start justify-between gap-2 mb-1.5">
               <p className="text-sm font-semibold">{l.name}</p>
-              <span className="text-xs text-accent font-medium shrink-0">{l.rate}</span>
+              <span className="text-xs text-accent font-semibold shrink-0">{l.rate}</span>
             </div>
-            <p className="text-xs text-muted mb-2">Max loan: {l.maxLoan}</p>
-            <a
-              href={`tel:${l.contact.replace(/\s/g, "")}`}
-              className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-foreground transition-colors"
-            >
-              <Phone className="h-3 w-3" /> {l.contact}
-            </a>
+            <p className="text-xs text-muted mb-3">Max loan: {l.maxLoan}</p>
+            <div className="flex items-center gap-2">
+              <a
+                href={`tel:${l.contact.replace(/\s/g, "")}`}
+                className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 rounded-lg border border-border bg-surface text-xs font-medium hover:border-accent/50 hover:text-accent transition-colors"
+              >
+                <Phone className="h-3 w-3" /> Call
+              </a>
+              {l.applyUrl ? (
+                <a
+                  href={l.applyUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 h-8 rounded-lg bg-accent text-white text-xs font-semibold hover:opacity-90 transition-opacity"
+                >
+                  Apply <ChevronRight className="h-3 w-3" />
+                </a>
+              ) : (
+                <a
+                  href={`tel:${l.contact.replace(/\s/g, "")}`}
+                  className="flex-1 inline-flex items-center justify-center h-8 rounded-lg border border-border bg-surface text-xs font-medium text-muted hover:text-foreground transition-colors"
+                >
+                  {l.contact}
+                </a>
+              )}
+            </div>
           </div>
         ))}
       </div>

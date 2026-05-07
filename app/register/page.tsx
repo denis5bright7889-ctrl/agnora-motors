@@ -48,26 +48,28 @@ export default function RegisterPage() {
       }),
     });
 
-    const json = await res.json();
+    const json = await res.json() as { error?: string; verified?: boolean; verificationSent?: boolean };
     if (!res.ok) {
       setServerError(json.error ?? "Registration failed");
       return;
     }
 
-    // Auto sign in
-    const result = await signIn("credentials", {
-      email: data.email,
-      password: data.password,
-      redirect: false,
-    });
-
-    if (result?.error) {
-      setServerError("Account created — please sign in.");
-      router.push("/login");
-      return;
+    if (json.verified) {
+      // Local users (no DB) skip verification — sign in directly
+      const result = await signIn("credentials", {
+        email: data.email,
+        password: data.password,
+        redirect: false,
+      });
+      if (result?.error) {
+        router.push("/login");
+        return;
+      }
+      router.push("/");
+    } else {
+      // DB users must verify their email first
+      router.push(`/verify-email?email=${encodeURIComponent(data.email)}`);
     }
-
-    router.push("/");
   }
 
   return (

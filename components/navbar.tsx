@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import {
-  ChevronDown, LayoutDashboard, ShieldCheck,
+  ChevronDown, LayoutDashboard,
   LogOut, User, Bell, MessageSquare, Settings, MessageCircle, BarChart3,
 } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
@@ -123,7 +123,7 @@ export function Navbar() {
 
                     {/* Dynamic Dashboard Logic */}
                     <DropdownItem 
-                      href={isDealer || isAdmin ? "/dealer-dashboard" : "/private-dashboard"} 
+                      href={isDealer || isAdmin ? "/dealer/dashboard" : "/dashboard"}
                       icon={LayoutDashboard} 
                       label="Dashboard" 
                     />

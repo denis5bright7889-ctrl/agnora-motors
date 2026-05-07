@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn, useSession } from "next-auth/react";
-import { Eye, EyeOff, X } from "lucide-react";
+import { Eye, EyeOff, X, CheckCircle2 } from "lucide-react";
 import { useState, Suspense } from "react";
 import { cn } from "@/lib/utils";
 
@@ -21,8 +21,10 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextUrl = searchParams.get("next") ?? "";
+  const justVerified = searchParams.get("verified") === "1";
   const [showPw, setShowPw] = useState(false);
   const [serverError, setServerError] = useState("");
+  const [lastEmail, setLastEmail] = useState("");
   const { update } = useSession();
 
   const {
@@ -33,6 +35,7 @@ function LoginForm() {
 
   async function onSubmit(data: FormData) {
     setServerError("");
+    setLastEmail(data.email);
     const result = await signIn("credentials", {
       email: data.email,
       password: data.password,
@@ -54,6 +57,8 @@ function LoginForm() {
       router.push("/admin");
     } else if (role === "dealer") {
       router.push("/dealer/dashboard");
+    } else if (role === "private_seller") {
+      router.push("/dashboard");
     } else {
       router.push("/");
     }
@@ -65,10 +70,27 @@ function LoginForm() {
       <h1 className="font-display text-2xl font-medium mb-1">Welcome back</h1>
       <p className="text-sm text-muted mb-7">Sign in to your account</p>
 
+      {justVerified && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl bg-green-500/10 border border-green-500/20 px-4 py-3 text-sm text-green-600 dark:text-green-400">
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          Email verified! You can now sign in.
+        </div>
+      )}
       {serverError && (
-        <div className="mb-4 flex items-center gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
-          <X className="h-4 w-4 shrink-0" />
-          {serverError}
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
+            <X className="h-4 w-4 shrink-0" />
+            {serverError}
+          </div>
+          <p className="text-xs text-muted text-center">
+            Not verified?{" "}
+            <Link
+              href={`/verify-email?email=${encodeURIComponent(lastEmail)}`}
+              className="underline hover:text-foreground"
+            >
+              Resend verification code
+            </Link>
+          </p>
         </div>
       )}
 

@@ -102,11 +102,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           console.log("[authorize] db email=%s valid=%s", email, valid);
           if (!valid) return null;
 
+          if (!user.emailVerified) {
+            console.log("[authorize] db: email not verified for %s", email);
+            return null;
+          }
+
           return {
             id:    user.id,
             email: user.email,
             name:  user.name  ?? undefined,
-            emailVerified: (user as any).emailVerified ?? null,
+            emailVerified: user.emailVerified ? new Date() : null,
             role:  user.role,
           };
         } catch (err) {

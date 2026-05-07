@@ -57,15 +57,38 @@ export async function getUserById(id: string): Promise<User | null> {
 
 export async function getUserWithHash(
   email: string,
-): Promise<(User & { passwordHash: string | null }) | null> {
-  const rows = await query<User & { passwordHash: string | null }>(
+): Promise<(User & { passwordHash: string | null; emailVerified: boolean }) | null> {
+  const rows = await query<User & { passwordHash: string | null; emailVerified: boolean }>(
     `SELECT id, name, email, image, role,
-            password_hash AS "passwordHash",
-            created_at   AS "createdAt"
+            password_hash      AS "passwordHash",
+            email_verified     AS "emailVerified",
+            created_at         AS "createdAt"
      FROM users WHERE email = $1 LIMIT 1`,
     [email],
   );
   return rows[0] ?? null;
+}
+
+export async function setVerificationCode(email: string, code: string): Promise<void> {
+  await query(
+    `UPDATE users
+     SET verification_code = $1, verification_expires_at = NOW() + INTERVAL '30 minutes'
+     WHERE email = $2`,
+    [code, email],
+  );
+}
+
+export async function verifyEmailCode(email: string, code: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE users
+     SET email_verified = TRUE, verification_code = NULL, verification_expires_at = NULL
+     WHERE email = $1
+       AND verification_code = $2
+       AND verification_expires_at > NOW()
+     RETURNING id`,
+    [email, code],
+  );
+  return rows.length > 0;
 }
 
 export async function createUser(data: {

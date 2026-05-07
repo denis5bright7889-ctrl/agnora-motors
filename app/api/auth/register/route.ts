@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { getUserByEmail, createUser, isDbConfigured } from "@/lib/db";
+import { getUserByEmail, createUser, setVerificationCode, isDbConfigured } from "@/lib/db";
 import { findLocalUser, createLocalUser } from "@/lib/local-users";
-import { Resend } from "resend";
+import { sendVerificationEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
 
@@ -34,7 +34,8 @@ export async function POST(req: Request) {
         passwordHash,
         role: "buyer",
       });
-      return NextResponse.json({ user: { id: user.id, email: user.email } }, { status: 201 });
+      // Local users skip email verification
+      return NextResponse.json({ user: { id: user.id, email: user.email }, verified: true }, { status: 201 });
     }
 
     // ── Database path ─────────────────────────────────────────
@@ -51,7 +52,17 @@ export async function POST(req: Request) {
       role: "buyer",
     });
 
-    return NextResponse.json({ user: { id: user.id, email: user.email } }, { status: 201 });
+    // Generate and send 6-digit verification code (fire-and-forget on send)
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    await setVerificationCode(parsed.data.email, code);
+    sendVerificationEmail(parsed.data.email, parsed.data.name, code).catch((e) =>
+      console.error("[register] email send failed:", e),
+    );
+
+    return NextResponse.json(
+      { user: { id: user.id, email: user.email }, verificationSent: true },
+      { status: 201 },
+    );
   } catch (err) {
     const e = err as { code?: string; message?: string; stack?: string };
     console.error("[register] error code=%s message=%s", e.code ?? "n/a", e.message ?? String(err));

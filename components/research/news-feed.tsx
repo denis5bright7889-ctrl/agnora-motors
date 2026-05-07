@@ -6,10 +6,12 @@ import { formatDate } from "@/lib/utils";
 import type { NewsArticle } from "@/types";
 import { cn } from "@/lib/utils";
 
-// Legacy alias — the new API returns NewsArticle objects
+// The API may return NewsArticle objects (new format) or legacy NewsItem objects.
+// summary is the NewsArticle field; we normalise to excerpt for display.
 type NewsItem = Pick<NewsArticle, "id" | "source" | "url" | "image" | "category" | "publishedAt"> & {
   title: string;
   excerpt: string;
+  summary?: string | null;
 };
 
 const CATEGORIES = ["All", "Luxury", "Electric", "SUV", "Hybrid", "Vintage"];
@@ -23,8 +25,9 @@ export function NewsFeed() {
     setLoading(true);
     try {
       const res = await fetch("/api/news");
-      const data = await res.json() as { news: NewsItem[] };
-      setNews(data.news);
+      const data = await res.json() as { articles?: NewsItem[]; news?: NewsItem[] };
+      const raw = data.articles ?? data.news ?? [];
+      setNews(raw.map(a => ({ ...a, excerpt: a.excerpt ?? a.summary ?? "" })));
     } catch {
       // ignore
     } finally {
