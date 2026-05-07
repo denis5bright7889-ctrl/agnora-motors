@@ -3,7 +3,7 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { getUserWithHash, createUser, getUserByEmail, isDbConfigured } from "@/lib/db";
+import { getUserWithHash, createUser, getUserByEmail, markUserEmailVerified, isDbConfigured } from "@/lib/db";
 import { findLocalUser } from "@/lib/local-users";
 import { authConfig } from "./auth.config";
 
@@ -155,6 +155,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           if (existing) {
             token.id   = existing.id;
             token.role = existing.role;
+            // Ensure existing Google users are marked as verified (idempotent)
+            markUserEmailVerified(existing.id).catch(() => {/* non-critical */});
             console.log("[jwt] google found existing user id=%s role=%s", existing.id, existing.role);
           } else {
             const created = await createUser({
@@ -163,10 +165,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               image: (token.picture as string | undefined) ?? undefined,
               role:  "buyer",
             });
+            // Google emails are pre-verified by Google
+            markUserEmailVerified(created.id).catch(() => {/* non-critical */});
             token.id   = created.id;
             token.role = "buyer";
             console.log("[jwt] google created new user id=%s", created.id);
           }
+          // Google accounts are always email-verified
+          token.emailVerified = new Date();
         } catch (err) {
           // Never throw here — a thrown jwt callback causes NextAuth to redirect
           // to /login?error=Callback, which looks like a login loop.

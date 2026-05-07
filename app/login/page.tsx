@@ -56,9 +56,9 @@ function LoginForm() {
     } else if (role === "admin") {
       router.push("/admin");
     } else if (role === "dealer") {
-      router.push("/dealer/dashboard");
+      router.push("/dealer-dashboard");
     } else if (role === "private_seller") {
-      router.push("/dashboard");
+      router.push("/private-dashboard");
     } else {
       router.push("/");
     }

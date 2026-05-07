@@ -52,15 +52,26 @@ export async function POST(req: Request) {
       role: "buyer",
     });
 
-    // Generate and send 6-digit verification code (fire-and-forget on send)
-    const code = String(Math.floor(100000 + Math.random() * 900000));
-    await setVerificationCode(parsed.data.email, code);
-    sendVerificationEmail(parsed.data.email, parsed.data.name, code).catch((e) =>
-      console.error("[register] email send failed:", e),
-    );
+    // Generate and send 6-digit verification code — non-blocking so a DB schema
+    // migration lag or missing RESEND_API_KEY never prevents account creation.
+    let verificationSent = false;
+    try {
+      const code = String(Math.floor(100000 + Math.random() * 900000));
+      await setVerificationCode(parsed.data.email, code);
+      verificationSent = true;
+      sendVerificationEmail(parsed.data.email, parsed.data.name, code).catch((e) =>
+        console.error("[register] email send failed:", e),
+      );
+    } catch (verifyErr) {
+      console.error("[register] verification setup failed (non-fatal):", verifyErr);
+    }
 
     return NextResponse.json(
-      { user: { id: user.id, email: user.email }, verificationSent: true },
+      {
+        user: { id: user.id, email: user.email },
+        verificationSent,
+        verified: !verificationSent, // if verification setup failed, allow direct login
+      },
       { status: 201 },
     );
   } catch (err) {

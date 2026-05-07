@@ -85,10 +85,10 @@ export function Navbar() {
           {/* ── Action Icons & Profile ── */}
           {session ? (
             <div className="flex items-center gap-1 sm:gap-2">
-              <button className="h-10 w-10 flex items-center justify-center rounded-full hover:bg-surface-2 text-muted transition-colors">
+              <button className="hidden sm:flex h-10 w-10 items-center justify-center rounded-full hover:bg-surface-2 text-muted transition-colors">
                 <Bell className="h-5 w-5" />
               </button>
-              <button className="h-10 w-10 flex items-center justify-center rounded-full hover:bg-surface-2 text-muted transition-colors">
+              <button className="hidden sm:flex h-10 w-10 items-center justify-center rounded-full hover:bg-surface-2 text-muted transition-colors">
                 <MessageSquare className="h-5 w-5" />
               </button>
 
@@ -122,10 +122,10 @@ export function Navbar() {
                     </div>
 
                     {/* Dynamic Dashboard Logic */}
-                    <DropdownItem 
-                      href={isDealer || isAdmin ? "/dealer/dashboard" : "/dashboard"}
-                      icon={LayoutDashboard} 
-                      label="Dashboard" 
+                    <DropdownItem
+                      href={isAdmin ? "/admin" : isDealer ? "/dealer-dashboard" : "/private-dashboard"}
+                      icon={LayoutDashboard}
+                      label="Dashboard"
                     />
                     <DropdownItem href="#" icon={MessageCircle} label="Feedback" />
                     <DropdownItem href="#" icon={BarChart3} label="Performance" />

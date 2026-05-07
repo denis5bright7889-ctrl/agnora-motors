@@ -91,6 +91,13 @@ export async function verifyEmailCode(email: string, code: string): Promise<bool
   return rows.length > 0;
 }
 
+export async function markUserEmailVerified(userId: string): Promise<void> {
+  await query(
+    `UPDATE users SET email_verified = TRUE WHERE id = $1`,
+    [userId],
+  );
+}
+
 export async function createUser(data: {
   email: string;
   name: string;

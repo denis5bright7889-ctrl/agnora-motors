@@ -171,7 +171,133 @@ export default function FinancePage() {
           </div>
         </div>
       </section>
+
+      {/* Finance News & Market Updates */}
+      <FinanceNews />
     </div>
+  );
+}
+
+// ── Finance News ─────────────────────────────────────────────
+
+const FINANCE_ARTICLES = [
+  {
+    id: "1",
+    category: "Market Update",
+    categoryColor: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+    title: "CBK holds base lending rate at 13% — what it means for car loans",
+    excerpt:
+      "The Central Bank of Kenya maintained its benchmark rate, keeping auto-loan interest rates steady for consumers seeking vehicle financing in 2025.",
+    date: "May 2025",
+    readTime: "3 min read",
+  },
+  {
+    id: "2",
+    category: "Buying Guide",
+    categoryColor: "bg-green-500/15 text-green-600 dark:text-green-400",
+    title: "Hire purchase vs. bank loan: which is cheaper for a used car in Kenya?",
+    excerpt:
+      "We compare the total cost of ownership across Kenya's most popular financing options — from dealer hire purchase to SACCO and commercial-bank loans.",
+    date: "Apr 2025",
+    readTime: "5 min read",
+  },
+  {
+    id: "3",
+    category: "Tips",
+    categoryColor: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",
+    title: "5 things lenders check before approving your car loan",
+    excerpt:
+      "Credit score, income-to-debt ratio, employment status — here's what Kenya's banks and SACCOs look at before saying yes to your auto-finance application.",
+    date: "Apr 2025",
+    readTime: "4 min read",
+  },
+  {
+    id: "4",
+    category: "Policy",
+    categoryColor: "bg-purple-500/15 text-purple-500",
+    title: "KRA duty changes on imported vehicles — updated 2025 guide",
+    excerpt:
+      "Kenya Revenue Authority revised excise duty bands on passenger vehicles. We break down exactly how much you'll pay on a 1,500 cc, 2,000 cc, or 2,500 cc import.",
+    date: "Mar 2025",
+    readTime: "6 min read",
+  },
+  {
+    id: "5",
+    category: "EV Finance",
+    categoryColor: "bg-teal-500/15 text-teal-600 dark:text-teal-400",
+    title: "Financing an electric vehicle in Kenya — banks that offer EV loans",
+    excerpt:
+      "As electric vehicles gain traction in Kenya, a growing number of banks now offer tailored EV finance products. We list the best deals and rates available today.",
+    date: "Feb 2025",
+    readTime: "4 min read",
+  },
+  {
+    id: "6",
+    category: "Market Update",
+    categoryColor: "bg-blue-500/15 text-blue-600 dark:text-blue-400",
+    title: "SACCO lending hits record high — cheaper auto loans for members",
+    excerpt:
+      "Kenya's cooperative sector reported its highest-ever vehicle-loan disbursement in Q1 2025, driven by lower rates and expanded credit limits for members.",
+    date: "Jan 2025",
+    readTime: "3 min read",
+  },
+];
+
+function FinanceNews() {
+  return (
+    <section className="py-20 px-4">
+      <div className="container max-w-container">
+        <div className="flex items-end justify-between mb-10">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-accent mb-1">Finance news</p>
+            <h2 className="font-display text-3xl font-medium">Market updates & guides</h2>
+          </div>
+          <Link
+            href="/research"
+            className="hidden sm:inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors"
+          >
+            More research <ChevronRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {FINANCE_ARTICLES.map((article) => (
+            <article
+              key={article.id}
+              className="group flex flex-col rounded-2xl border border-border bg-surface p-5 hover:border-accent/40 hover:shadow-md hover:shadow-black/5 dark:hover:shadow-black/20 transition-all"
+            >
+              <div className="flex items-center gap-2 mb-3">
+                <span className={cn("rounded-full px-2.5 py-0.5 text-[10px] font-semibold", article.categoryColor)}>
+                  {article.category}
+                </span>
+                <span className="text-[10px] text-muted ml-auto">{article.date}</span>
+              </div>
+              <h3 className="font-semibold text-sm leading-snug mb-2 group-hover:text-accent transition-colors flex-1">
+                {article.title}
+              </h3>
+              <p className="text-xs text-muted leading-relaxed line-clamp-3 mb-4">
+                {article.excerpt}
+              </p>
+              <div className="flex items-center justify-between text-[10px] text-muted mt-auto">
+                <span>{article.readTime}</span>
+                <span className="flex items-center gap-0.5 text-accent font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                  Read <ArrowRight className="h-3 w-3" />
+                </span>
+              </div>
+            </article>
+          ))}
+        </div>
+
+        <div className="mt-8 sm:hidden text-center">
+          <Link
+            href="/research"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-muted hover:text-foreground transition-colors"
+          >
+            More articles <ChevronRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }
 

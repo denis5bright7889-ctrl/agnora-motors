@@ -29,7 +29,7 @@ export default function PrivateSellerRegisterPage() {
       });
       const data = await res.json() as { error?: string };
       if (!res.ok) { setError(data.error ?? "Registration failed"); return; }
-      router.push("/dealer/dashboard");
+      router.push("/private-dashboard");
     } catch {
       setError("Network error. Please try again.");
     } finally {
