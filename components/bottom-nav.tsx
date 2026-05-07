@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Home, Search, PlusCircle, User, Banknote } from "lucide-react";
+import { Home, Search, PlusCircle, BookOpen, Banknote } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
@@ -20,6 +20,7 @@ const BASE_ITEMS: NavItem[] = [
   { href: "/cars",     icon: Search,    label: "Search" },
   { href: "/sell",     icon: PlusCircle, label: "Sell", accent: true },
   { href: "/finance",  icon: Banknote,  label: "Finance" },
+  { href: "/research", icon: BookOpen,  label: "Research" },
 ];
 
 const HIDDEN_ON = ["/admin", "/dealer", "/login", "/register"];
@@ -31,19 +32,7 @@ export function BottomNav() {
 
   if (HIDDEN_ON.some((p) => pathname?.startsWith(p))) return null;
 
-  const profileItem: NavItem = {
-    href: session
-      ? session.user.role === "admin"
-        ? "/admin"
-        : session.user.role === "dealer"
-          ? "/dealer-dashboard"
-          : "/private-dashboard"
-      : "/login",
-    icon: User,
-    label: session ? "Account" : "Profile",
-  };
-
-  const items: NavItem[] = [...BASE_ITEMS, profileItem];
+  const items: NavItem[] = [...BASE_ITEMS];
 
   return (
     <nav

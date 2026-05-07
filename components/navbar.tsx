@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useEffect, useRef } from "react";
 import {
   ChevronDown, LayoutDashboard, ShieldCheck,
-  LogOut, User,
+  LogOut, User, Bell, MessageSquare, Settings, MessageCircle, BarChart3,
 } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
@@ -79,64 +79,76 @@ export function Navbar() {
         </nav>
 
         {/* Right cluster */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2">
           <ThemeToggle />
 
-          {/* ── Signed in (desktop) ── */}
+          {/* ── Action Icons & Profile ── */}
           {session ? (
-            <div className="hidden md:block relative" ref={menuRef}>
-              <button
-                type="button"
-                onClick={() => setUserMenuOpen((v) => !v)}
-                className="flex h-10 items-center gap-2 rounded-full border border-border bg-surface-2 px-3 text-sm font-medium hover:bg-surface transition-colors"
-              >
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white text-xs font-semibold">
-                  {(session.user.name ?? session.user.email ?? "U")[0].toUpperCase()}
-                </span>
-                <span className="max-w-24 truncate text-xs">
-                  {session.user.name ?? session.user.email}
-                </span>
-                <ChevronDown className={cn("h-3 w-3 text-muted transition-transform", userMenuOpen && "rotate-180")} />
+            <div className="flex items-center gap-1 sm:gap-2">
+              <button className="h-10 w-10 flex items-center justify-center rounded-full hover:bg-surface-2 text-muted transition-colors">
+                <Bell className="h-5 w-5" />
+              </button>
+              <button className="h-10 w-10 flex items-center justify-center rounded-full hover:bg-surface-2 text-muted transition-colors">
+                <MessageSquare className="h-5 w-5" />
               </button>
 
-              {userMenuOpen && (
-                <div className="absolute right-0 mt-2 w-52 rounded-2xl border border-border bg-surface shadow-xl shadow-black/10 dark:shadow-black/40 py-1 overflow-hidden">
-                  <div className="px-4 py-2.5 border-b border-border">
-                    <p className="text-xs font-semibold truncate">{session.user.name}</p>
-                    <p className="text-xs text-muted truncate">{session.user.email}</p>
-                    <span className={cn(
-                      "mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
-                      isAdmin  ? "bg-accent-soft text-accent" :
-                      isDealer ? "bg-blue-500/15 text-blue-500" :
-                                 "bg-surface-2 text-muted",
-                    )}>
-                      {role}
-                    </span>
-                  </div>
+              <div className="relative" ref={menuRef}>
+                <button
+                  type="button"
+                  onClick={() => setUserMenuOpen((v) => !v)}
+                  className="flex h-10 items-center gap-2 rounded-full border border-border bg-surface-2 px-2 sm:px-3 text-sm font-medium hover:bg-surface transition-colors"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white text-xs font-semibold">
+                    <User className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="hidden sm:inline-block max-w-24 truncate text-xs">
+                    Profile
+                  </span>
+                  <ChevronDown className={cn("h-3 w-3 text-muted transition-transform", userMenuOpen && "rotate-180")} />
+                </button>
 
-                  {isAdmin  && <DropdownItem href="/admin"            icon={ShieldCheck}     label="Admin panel" />}
-                  {(isAdmin || isDealer) && (
-                    <DropdownItem href="/dealer/dashboard" icon={LayoutDashboard} label="Dealer dashboard" />
-                  )}
-                  <DropdownItem href="#" icon={User} label="My profile" />
+                {userMenuOpen && (
+                  <div className="absolute right-0 mt-2 w-52 rounded-2xl border border-border bg-surface shadow-xl shadow-black/10 dark:shadow-black/40 py-1 overflow-hidden animate-fade-up">
+                    <div className="px-4 py-2.5 border-b border-border">
+                      <p className="text-xs font-semibold truncate">{session.user.name}</p>
+                      <span className={cn(
+                        "mt-1 inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize",
+                        isAdmin  ? "bg-accent-soft text-accent" :
+                        isDealer ? "bg-blue-500/15 text-blue-500" :
+                                   "bg-surface-2 text-muted",
+                      )}>
+                        {role?.replace("_", " ")}
+                      </span>
+                    </div>
 
-                  <div className="border-t border-border mt-1 pt-1">
-                    <button
-                      type="button"
-                      onClick={() => signOut({ callbackUrl: "/" })}
-                      className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-muted hover:text-foreground hover:bg-surface-2 transition-colors"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      Sign out
-                    </button>
+                    {/* Dynamic Dashboard Logic */}
+                    <DropdownItem 
+                      href={isDealer || isAdmin ? "/dealer-dashboard" : "/private-dashboard"} 
+                      icon={LayoutDashboard} 
+                      label="Dashboard" 
+                    />
+                    <DropdownItem href="#" icon={MessageCircle} label="Feedback" />
+                    <DropdownItem href="#" icon={BarChart3} label="Performance" />
+                    <DropdownItem href="/settings" icon={Settings} label="Settings" />
+
+                    <div className="border-t border-border mt-1 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => signOut({ callbackUrl: "/" })}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-500/5 transition-colors"
+                      >
+                        <LogOut className="h-4 w-4" />
+                        Log out
+                      </button>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           ) : (
             <Link
               href="/login"
-              className="hidden md:inline-flex h-10 items-center rounded-full bg-foreground px-5 text-sm font-medium text-background transition-opacity hover:opacity-90"
+              className="inline-flex h-10 items-center rounded-full bg-foreground px-5 text-sm font-medium text-background transition-opacity hover:opacity-90"
             >
               Sign in
             </Link>
