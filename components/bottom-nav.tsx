@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Home, Search, PlusCircle, BookOpen, Banknote } from "lucide-react";
+import { Home, Car, PlusCircle, BookOpen, Banknote } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
@@ -17,7 +17,7 @@ type NavItem = {
 
 const BASE_ITEMS: NavItem[] = [
   { href: "/",         icon: Home,      label: "Home" },
-  { href: "/cars",     icon: Search,    label: "Search" },
+  { href: "/cars",     icon: Car,       label: "Buy" },
   { href: "/sell",     icon: PlusCircle, label: "Sell", accent: true },
   { href: "/finance",  icon: Banknote,  label: "Finance" },
   { href: "/research", icon: BookOpen,  label: "Research" },
