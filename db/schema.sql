@@ -3,6 +3,9 @@
 -- Run once in your Neon SQL editor or psql
 -- ============================================================
 
+
+-- ============================================================
+
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
   name          TEXT,
@@ -195,6 +198,46 @@ CREATE INDEX IF NOT EXISTS idx_private_sellers_user ON private_sellers(user_id);
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status     TEXT        NOT NULL DEFAULT 'active';
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+
+-- ── Users — phone columns ────────────────────────────────────────────────────
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone          TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- ── Phone OTP (SMS codes, 10-minute expiry) ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS phone_otps (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  phone      TEXT        NOT NULL,
+  code       TEXT        NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL,
+  verified   BOOLEAN     NOT NULL DEFAULT FALSE,
+  attempts   INTEGER     NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_phone_otps_user ON phone_otps(user_id);
+CREATE INDEX IF NOT EXISTS idx_phone_otps_exp  ON phone_otps(expires_at);
+
+-- ── Seller verifications (KYC + admin review) ────────────────────────────────
+CREATE TABLE IF NOT EXISTS seller_verifications (
+  id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id           TEXT        UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  phone             TEXT,
+  phone_verified    BOOLEAN     NOT NULL DEFAULT FALSE,
+  id_doc_url        TEXT,
+  kra_cert_url      TEXT,
+  logbook_url       TEXT,
+  selfie_url        TEXT,
+  business_cert_url TEXT,
+  status            TEXT        NOT NULL DEFAULT 'pending',
+  admin_notes       TEXT,
+  reviewed_by       TEXT        REFERENCES users(id),
+  reviewed_at       TIMESTAMPTZ,
+  submitted_at      TIMESTAMPTZ,
+  created_at        TIMESTAMPTZ DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sv_status ON seller_verifications(status);
+CREATE INDEX IF NOT EXISTS idx_sv_user   ON seller_verifications(user_id);
 
 -- Seed admin (update email/password after running)
 INSERT INTO users (id, email, name, role, email_verified)

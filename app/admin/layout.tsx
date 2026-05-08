@@ -7,18 +7,20 @@ import {
   Car,
   BarChart3,
   ShieldCheck,
+  UserCheck,
   LogOut,
   ChevronRight,
   Newspaper,
 } from "lucide-react";
 
 const navItems = [
-  { href: "/admin",         label: "Overview",  icon: LayoutDashboard, exact: true },
-  { href: "/admin/dealers", label: "Dealers",   icon: ShieldCheck },
-  { href: "/admin/cars",    label: "Listings",  icon: Car },
-  { href: "/admin/content", label: "Content",   icon: Newspaper },
+  { href: "/admin",          label: "Overview",  icon: LayoutDashboard, exact: true },
+  { href: "/admin/dealers",  label: "Dealers",   icon: ShieldCheck },
+  { href: "/admin/sellers",  label: "Sellers",   icon: UserCheck },
+  { href: "/admin/cars",     label: "Listings",  icon: Car },
+  { href: "/admin/content",  label: "Content",   icon: Newspaper },
   { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/admin/users",   label: "Users",     icon: Users },
+  { href: "/admin/users",    label: "Users",     icon: Users },
 ];
 
 export default async function AdminLayout({

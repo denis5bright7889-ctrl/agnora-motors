@@ -76,7 +76,7 @@ export default function SellPage() {
               description="List your own car. Buyers contact you directly. Great for individual vehicle sales with full control."
               features={["Free listing", "Direct buyer contact", "Manage your own schedule", "No dealer fees"]}
               cta="Create a private listing"
-              href="/register"
+              href="/seller/verify"
               accent={false}
             />
             <SellPathCard

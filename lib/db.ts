@@ -1019,3 +1019,198 @@ export async function incrementResearchViewCount(id: string): Promise<void> {
     [id],
   );
 }
+
+// ── Phone OTPs ─────────────────────────────────────────────────────────────
+
+export interface PhoneOtp {
+  id: string;
+  userId: string;
+  phone: string;
+  code: string;
+  expiresAt: string;
+  verified: boolean;
+  attempts: number;
+  createdAt: string;
+}
+
+export async function upsertPhoneOtp(userId: string, phone: string, code: string): Promise<void> {
+  await query(`DELETE FROM phone_otps WHERE user_id = $1`, [userId]);
+  await query(
+    `INSERT INTO phone_otps (user_id, phone, code, expires_at)
+     VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')`,
+    [userId, phone, code],
+  );
+}
+
+export async function verifyPhoneOtp(
+  userId: string,
+  code: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const rows = await query<PhoneOtp>(
+    `SELECT id, code, expires_at AS "expiresAt", verified, attempts
+     FROM phone_otps WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+    [userId],
+  );
+  const otp = rows[0];
+  if (!otp)                              return { ok: false, error: "No code found. Request a new one." };
+  if (otp.verified)                      return { ok: false, error: "Code already used." };
+  if (new Date(otp.expiresAt) < new Date()) return { ok: false, error: "Code expired. Request a new one." };
+  if (otp.attempts >= 5)                 return { ok: false, error: "Too many attempts. Request a new code." };
+
+  if (otp.code !== code) {
+    await query(`UPDATE phone_otps SET attempts = attempts + 1 WHERE id = $1`, [otp.id]);
+    return { ok: false, error: "Invalid code." };
+  }
+  await query(`UPDATE phone_otps SET verified = TRUE WHERE id = $1`, [otp.id]);
+  return { ok: true };
+}
+
+// ── Seller verifications ───────────────────────────────────────────────────
+
+export interface SellerVerification {
+  id: string;
+  userId: string;
+  phone: string | null;
+  phoneVerified: boolean;
+  idDocUrl: string | null;
+  kraCertUrl: string | null;
+  logbookUrl: string | null;
+  selfieUrl: string | null;
+  businessCertUrl: string | null;
+  status: "pending" | "submitted" | "approved" | "rejected";
+  adminNotes: string | null;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  submittedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  userName?: string | null;
+  userEmail?: string | null;
+}
+
+const SV_COLS = `
+  sv.id, sv.user_id AS "userId", sv.phone, sv.phone_verified AS "phoneVerified",
+  sv.id_doc_url AS "idDocUrl", sv.kra_cert_url AS "kraCertUrl",
+  sv.logbook_url AS "logbookUrl", sv.selfie_url AS "selfieUrl",
+  sv.business_cert_url AS "businessCertUrl", sv.status,
+  sv.admin_notes AS "adminNotes", sv.reviewed_by AS "reviewedBy",
+  sv.reviewed_at AS "reviewedAt", sv.submitted_at AS "submittedAt",
+  sv.created_at AS "createdAt", sv.updated_at AS "updatedAt",
+  u.name AS "userName", u.email AS "userEmail"`;
+
+export async function getOrCreateSellerVerification(userId: string): Promise<SellerVerification> {
+  const rows = await query<SellerVerification>(
+    `SELECT ${SV_COLS} FROM seller_verifications sv
+     JOIN users u ON u.id = sv.user_id
+     WHERE sv.user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  if (rows[0]) return rows[0];
+  await query(`INSERT INTO seller_verifications (user_id) VALUES ($1) ON CONFLICT DO NOTHING`, [userId]);
+  const created = await query<SellerVerification>(
+    `SELECT ${SV_COLS} FROM seller_verifications sv
+     JOIN users u ON u.id = sv.user_id
+     WHERE sv.user_id = $1 LIMIT 1`,
+    [userId],
+  );
+  return created[0];
+}
+
+export async function patchSellerVerification(
+  userId: string,
+  fields: {
+    phone?: string;
+    phoneVerified?: boolean;
+    idDocUrl?: string;
+    kraCertUrl?: string;
+    logbookUrl?: string;
+    selfieUrl?: string;
+    businessCertUrl?: string;
+  },
+): Promise<void> {
+  const colMap: Record<string, string> = {
+    phone:           "phone",
+    phoneVerified:   "phone_verified",
+    idDocUrl:        "id_doc_url",
+    kraCertUrl:      "kra_cert_url",
+    logbookUrl:      "logbook_url",
+    selfieUrl:       "selfie_url",
+    businessCertUrl: "business_cert_url",
+  };
+  const sets = ["updated_at = NOW()"];
+  const vals: unknown[] = [];
+  let i = 1;
+  for (const [key, col] of Object.entries(colMap)) {
+    if (Object.prototype.hasOwnProperty.call(fields, key)) {
+      sets.push(`${col} = $${i++}`);
+      vals.push(fields[key as keyof typeof fields]);
+    }
+  }
+  if (sets.length === 1) return; // nothing to update
+  vals.push(userId);
+  await query(
+    `UPDATE seller_verifications SET ${sets.join(", ")} WHERE user_id = $${i}`,
+    vals,
+  );
+}
+
+export async function submitSellerVerification(userId: string): Promise<void> {
+  await query(
+    `UPDATE seller_verifications
+     SET status = 'submitted', submitted_at = NOW(), updated_at = NOW()
+     WHERE user_id = $1 AND status = 'pending'`,
+    [userId],
+  );
+}
+
+export async function listSellerVerifications(status?: string): Promise<SellerVerification[]> {
+  const hasFilter = status && status !== "all";
+  return query<SellerVerification>(
+    `SELECT ${SV_COLS} FROM seller_verifications sv
+     JOIN users u ON u.id = sv.user_id
+     ${hasFilter ? "WHERE sv.status = $1" : ""}
+     ORDER BY (sv.status = 'submitted')::int DESC,
+              sv.submitted_at DESC NULLS LAST,
+              sv.created_at DESC`,
+    hasFilter ? [status] : [],
+  );
+}
+
+export async function getSellerVerificationCounts(): Promise<Record<string, number>> {
+  const rows = await query<{ status: string; n: string }>(
+    `SELECT status, COUNT(*) AS n FROM seller_verifications GROUP BY status`,
+  );
+  const out: Record<string, number> = { all: 0 };
+  for (const r of rows) {
+    out[r.status] = Number(r.n);
+    out.all += Number(r.n);
+  }
+  return out;
+}
+
+export async function reviewSellerVerification(
+  id: string,
+  status: "approved" | "rejected",
+  adminId: string,
+  adminNotes?: string,
+): Promise<void> {
+  await query(
+    `UPDATE seller_verifications
+     SET status = $1, admin_notes = $2, reviewed_by = $3,
+         reviewed_at = NOW(), updated_at = NOW()
+     WHERE id = $4`,
+    [status, adminNotes ?? null, adminId, id],
+  );
+  if (status === "approved") {
+    const rows = await query<{ userId: string }>(
+      `SELECT user_id AS "userId" FROM seller_verifications WHERE id = $1`,
+      [id],
+    );
+    if (rows[0]) {
+      await query(
+        `UPDATE private_sellers SET verified = TRUE WHERE user_id = $1`,
+        [rows[0].userId],
+      );
+    }
+  }
+}
