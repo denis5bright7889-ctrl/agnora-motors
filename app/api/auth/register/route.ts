@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { getUserByEmail, createUser, setVerificationCode, isDbConfigured } from "@/lib/db";
+import { getUserByEmail, createUser, setVerificationCode, markUserEmailVerified, isDbConfigured } from "@/lib/db";
 import { findLocalUser, createLocalUser } from "@/lib/local-users";
 import { sendVerificationEmail } from "@/lib/email";
 
@@ -11,6 +11,10 @@ const schema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(8),
+  // Dealer registration skips email-verification gate because dealers go
+  // through document KYC (Director ID + Business Certificate) which is a
+  // stronger identity check than a verification email.
+  role: z.enum(["buyer", "dealer"]).optional().default("buyer"),
 });
 
 export async function POST(req: Request) {
@@ -49,11 +53,21 @@ export async function POST(req: Request) {
       email: parsed.data.email,
       name: parsed.data.name,
       passwordHash,
-      role: "buyer",
+      role: parsed.data.role,
     });
 
-    // Generate and send 6-digit verification code — non-blocking so a DB schema
-    // migration lag or missing RESEND_API_KEY never prevents account creation.
+    // Dealers skip email verification — they go through document KYC instead.
+    if (parsed.data.role === "dealer") {
+      await markUserEmailVerified(user.id);
+      return NextResponse.json(
+        { user: { id: user.id, email: user.email }, verified: true },
+        { status: 201 },
+      );
+    }
+
+    // Buyer path: generate and send 6-digit verification code.
+    // Non-blocking so a DB schema lag or missing RESEND_API_KEY never
+    // prevents account creation.
     let verificationSent = false;
     try {
       const code = String(Math.floor(100000 + Math.random() * 900000));
@@ -70,7 +84,7 @@ export async function POST(req: Request) {
       {
         user: { id: user.id, email: user.email },
         verificationSent,
-        verified: !verificationSent, // if verification setup failed, allow direct login
+        verified: !verificationSent,
       },
       { status: 201 },
     );

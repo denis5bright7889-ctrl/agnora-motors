@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -39,7 +39,6 @@ interface Docs {
 const STEPS = ["Your details", "Business info", "Documents", "Review"];
 
 export default function DealerRegisterPage() {
-  const router = useRouter();
   const [step, setStep] = useState(0);
   const [step1Data, setStep1Data] = useState<Step1Data | null>(null);
   const [step2Data, setStep2Data] = useState<Step2Data | null>(null);
@@ -79,7 +78,8 @@ export default function DealerRegisterPage() {
     setError("");
 
     try {
-      // 1. Register user account
+      // 1. Register user account (role: "dealer" auto-verifies email so
+      //    sign-in succeeds immediately — KYC via documents is stricter anyway)
       const regRes = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -87,6 +87,7 @@ export default function DealerRegisterPage() {
           name: step1Data.name,
           email: step1Data.email,
           password: step1Data.password,
+          role: "dealer",
         }),
       });
       const regJson = await regRes.json();
