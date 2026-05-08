@@ -1,34 +1,31 @@
-import { neon } from "@neondatabase/serverless";
+import { Pool } from "@neondatabase/serverless";
 import type { Car, Dealer, DealerCar, User, NewsArticle, ResearchArticle } from "@/types";
 
-// neon() v1.x — use sql.query(text, params) for parameterized calls.
-// Tagged-template form (sql`...`) is for unparameterized / interpolated queries only.
-let _sql: ReturnType<typeof neon> | null = null;
+// Use Pool (pg-compatible) so .query(text, params) works correctly.
+// The neon() tagged-template function does NOT expose a .query() method —
+// using it directly caused "sql.query is not a function" at runtime.
+let _pool: Pool | null = null;
 
-function getSql(): ReturnType<typeof neon> {
+function getPool(): Pool {
   if (!process.env.DATABASE_URL) {
     throw new Error(
       "DATABASE_URL is not configured. " +
       "Add it to Vercel → Settings → Environment Variables.",
     );
   }
-  if (!_sql) {
-    _sql = neon(process.env.DATABASE_URL);
+  if (!_pool) {
+    _pool = new Pool({ connectionString: process.env.DATABASE_URL });
   }
-  return _sql;
+  return _pool;
 }
 
 export async function query<T = Record<string, unknown>>(
   text: string,
   params: unknown[] = [],
 ): Promise<T[]> {
-  const sql = getSql();
-  // sql.query() is the v1.x API for conventional parameterized queries.
-  const rows = await (sql as unknown as { query: (t: string, p: unknown[]) => Promise<T[]> }).query(
-    text,
-    params,
-  );
-  return rows;
+  const pool = getPool();
+  const result = await pool.query<Record<string, unknown>>(text, params);
+  return result.rows as T[];
 }
 
 export function isDbConfigured(): boolean {

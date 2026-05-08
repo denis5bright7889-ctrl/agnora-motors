@@ -87,9 +87,22 @@ export async function POST(req: Request) {
     // 42P01 = undefined_table — schema hasn't been applied yet
     if (e.code === "42P01") {
       console.error("[register] The 'users' table does not exist. Run db/schema.sql in the Neon SQL editor.");
-      return NextResponse.json({ error: "Database not initialised" }, { status: 500 });
+      return NextResponse.json({ error: "Database not initialized. Run db/schema.sql." }, { status: 500 });
     }
 
-    return NextResponse.json({ error: "Registration failed" }, { status: 500 });
+    // 42703 = undefined_column — missing migration (ALTER TABLE not run)
+    if (e.code === "42703") {
+      return NextResponse.json({ error: "Database schema is out of date. Re-run db/schema.sql." }, { status: 500 });
+    }
+
+    // ECONNREFUSED / connection failures
+    if (e.message?.includes("ECONNREFUSED") || e.message?.includes("connect")) {
+      return NextResponse.json({ error: "Database connection failed. Check DATABASE_URL." }, { status: 500 });
+    }
+
+    const detail = process.env.NODE_ENV === "development"
+      ? (e.message ?? String(err))
+      : "Registration failed";
+    return NextResponse.json({ error: detail }, { status: 500 });
   }
 }

@@ -175,9 +175,26 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 );
 
 -- ── Email verification ───────────────────────────────────────────────────────
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified         BOOLEAN     NOT NULL DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code      TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified          BOOLEAN     NOT NULL DEFAULT FALSE;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code       TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMPTZ;
+
+-- ── Private sellers ──────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS private_sellers (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    TEXT        UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  phone      TEXT        NOT NULL,
+  location   TEXT        NOT NULL,
+  verified   BOOLEAN     NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_private_sellers_user ON private_sellers(user_id);
+
+-- ── Subscriptions — add missing columns ─────────────────────────────────────
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS status     TEXT        NOT NULL DEFAULT 'active';
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
 
 -- Seed admin (update email/password after running)
 INSERT INTO users (id, email, name, role, email_verified)
