@@ -80,7 +80,9 @@ export default async function PrivateDashboardPage() {
     }
   }
 
-  if (!hasSeller) redirect("/seller/register");
+  // Admins can view the private-seller dashboard in read-only mode even
+  // without a seller record (no private_sellers row exists for them).
+  if (!hasSeller && role !== "admin") redirect("/seller/register");
 
   const plan            = getPlan(planId);
   const car             = cars[0] ?? null;                        // private sellers show first car

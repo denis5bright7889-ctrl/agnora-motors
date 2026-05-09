@@ -12,6 +12,7 @@ declare module "next-auth" {
     user: {
       id: string;
       role: string;
+      isAdmin: boolean;
       emailVerified: Date | null;
     } & DefaultSession["user"];
   }
@@ -193,16 +194,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
+      // Admin email override (covers all providers including Google).
+      // Any sign-in with the configured ADMIN_EMAIL is always treated as admin
+      // and is always considered email-verified — enforced server-side only.
+      const adminEmail = process.env.ADMIN_EMAIL;
+      if (adminEmail && (token.email as string)?.toLowerCase() === adminEmail.toLowerCase()) {
+        token.role          = "admin";
+        token.emailVerified = token.emailVerified ?? new Date();
+        console.log("[jwt] ADMIN LOGIN DETECTED email=%s", token.email);
+      }
+
+      // Admin tokens are always email-verified (env admin has no emailVerified in DB)
+      if ((token.role as string) === "admin" && !token.emailVerified) {
+        token.emailVerified = new Date();
+      }
+
       return token;
     },
 
     session({ session, token }) {
-      session.user.id   = (token.id ?? token.sub) as string;
-      session.user.role = (token.role as string | undefined) ?? "private_seller";
+      session.user.id            = (token.id ?? token.sub) as string;
+      session.user.role          = (token.role as string | undefined) ?? "private_seller";
+      session.user.isAdmin       = session.user.role === "admin";
       session.user.emailVerified = (token.emailVerified as Date | null) ?? null;
 
-      console.log("[session] built id=%s role=%s email=%s",
-        session.user.id, session.user.role, session.user.email,
+      console.log("[session] built id=%s role=%s isAdmin=%s email=%s",
+        session.user.id, session.user.role, session.user.isAdmin, session.user.email,
       );
       return session;
     },

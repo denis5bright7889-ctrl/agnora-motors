@@ -23,6 +23,15 @@ export default auth((req) => {
     reqHeaders.set("x-impersonating", impersonatingId);
   }
 
+  // ── Admin bypass ──────────────────────────────────────────────────────────
+  // Admins have unrestricted access to every route — skip all role/verify
+  // checks. This is enforced server-side only; the role is set in auth.ts.
+  if (isLoggedIn && role === "admin") {
+    console.log("[middleware] ADMIN BYPASS ACTIVE path=%s email=%s",
+      path, req.auth?.user?.email ?? "unknown");
+    return NextResponse.next({ request: { headers: reqHeaders } });
+  }
+
   const isPrivateDash = path.startsWith("/private-dashboard");
   // /dealer/register is a public sign-up page — anyone can apply.
   // Exclude it from the dealer-dashboard protection group.

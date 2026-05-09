@@ -40,6 +40,7 @@ export const authConfig = {
       // Fallback to token.sub covers Google users on middleware-only reads.
       session.user.id            = (token.id ?? token.sub) as string;
       session.user.role          = (token.role as string | undefined) ?? "buyer";
+      session.user.isAdmin       = session.user.role === "admin";
       // emailVerified MUST be forwarded here — the middleware reads the session
       // via NextAuth(authConfig) and checks req.auth.user.emailVerified.
       // Without this line every verified user sees isVerified=false and gets
