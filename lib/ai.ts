@@ -1,12 +1,78 @@
-import Anthropic from "@anthropic-ai/sdk";
+// ── Groq client (free tier, no credit card required) ─────────────────────────
+// Sign up at console.groq.com → API Keys → Create API Key
+// Add GROQ_API_KEY to .env.local and Vercel environment variables.
 
-let _client: Anthropic | null = null;
+const GROQ_BASE = "https://api.groq.com/openai/v1";
+const GROQ_MODEL = "llama-3.3-70b-versatile"; // fast + capable, free tier
 
-export function getAnthropicClient(): Anthropic {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not configured");
-  _client ??= new Anthropic({ apiKey });
-  return _client;
+export function getGroqApiKey(): string {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new Error("GROQ_API_KEY is not configured — add it to your environment variables");
+  return key;
+}
+
+/**
+ * Stream a Groq chat completion and forward raw SSE chunks to a
+ * ReadableStream controller. Groq uses the OpenAI SSE format:
+ *   data: {"choices":[{"delta":{"content":"..."}}]}
+ *   data: [DONE]
+ */
+export async function streamGroqChat(
+  messages: Array<{ role: "user" | "assistant" | "system"; content: string }>,
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+): Promise<void> {
+  const key = getGroqApiKey();
+
+  const res = await fetch(`${GROQ_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${key}`,
+      "Content-Type":  "application/json",
+    },
+    body: JSON.stringify({
+      model:      GROQ_MODEL,
+      messages,
+      max_tokens: 1_024,
+      stream:     true,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => res.statusText);
+    throw new Error(`Groq API error ${res.status}: ${err}`);
+  }
+
+  const reader  = res.body?.getReader();
+  const dec     = new TextDecoder();
+  if (!reader) return;
+
+  let buf = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() ?? ""; // keep incomplete last line for next chunk
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("data:")) continue;
+      const data = trimmed.slice(5).trim();
+      if (data === "[DONE]") return;
+
+      try {
+        const json = JSON.parse(data) as {
+          choices: Array<{ delta: { content?: string }; finish_reason: string | null }>;
+        };
+        const text = json.choices[0]?.delta?.content;
+        if (text) controller.enqueue(encoder.encode(text));
+      } catch {
+        // malformed chunk — skip
+      }
+    }
+  }
 }
 
 // ── System prompt ─────────────────────────────────────────────────────────────
