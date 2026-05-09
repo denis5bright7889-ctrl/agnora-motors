@@ -5,18 +5,19 @@ import { NextResponse } from "next/server";
 const { auth } = NextAuth(authConfig);
 
 export default auth((req) => {
-  const isLoggedIn   = !!req.auth;
-  const role         = req.auth?.user?.role;
-  const isVerified   = !!req.auth?.user?.emailVerified;
-  const { nextUrl }  = req;
-  const path         = nextUrl.pathname;
+  const isLoggedIn = !!req.auth;
+  const role       = req.auth?.user?.role;
+  // emailVerified is now forwarded by auth.config.ts session callback — without
+  // that fix this was always undefined and every user looped back to /verify-email.
+  const isVerified = !!req.auth?.user?.emailVerified;
+  const { nextUrl } = req;
+  const path        = nextUrl.pathname;
 
-  // ── Protected route groups ────────────────────────────────────
-  const isPrivateDash  = path.startsWith("/private-dashboard");
-  const isDealerDash   = path.startsWith("/dealer-dashboard") || path.startsWith("/dealer/");
-  const isAdminDash    = path.startsWith("/admin");
+  const isPrivateDash = path.startsWith("/private-dashboard");
+  const isDealerDash  = path.startsWith("/dealer-dashboard") || path.startsWith("/dealer/");
+  const isAdminDash   = path.startsWith("/admin");
 
-  // Redirect to login if not authenticated
+  // ── Unauthenticated users → login ────────────────────────────────────────
   if ((isPrivateDash || isDealerDash || isAdminDash) && !isLoggedIn) {
     const loginUrl = new URL("/login", nextUrl);
     loginUrl.searchParams.set("next", path);
@@ -25,8 +26,7 @@ export default auth((req) => {
 
   if (!isLoggedIn) return NextResponse.next();
 
-  // ── Email verification gate ───────────────────────────────────
-  // Only enforce for dashboard routes; skip the verify-email page itself
+  // ── Email verification gate (dashboard routes only) ───────────────────────
   const needsVerify = isPrivateDash || isDealerDash;
   if (needsVerify && !isVerified && !path.startsWith("/verify-email")) {
     const verifyUrl = new URL("/verify-email", nextUrl);
@@ -34,7 +34,7 @@ export default auth((req) => {
     return NextResponse.redirect(verifyUrl);
   }
 
-  // ── Role enforcement ──────────────────────────────────────────
+  // ── Role enforcement ──────────────────────────────────────────────────────
   if (isAdminDash && role !== "admin") {
     return NextResponse.redirect(new URL("/", nextUrl));
   }
