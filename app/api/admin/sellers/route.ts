@@ -5,6 +5,7 @@ import {
   getSellerVerificationCounts,
   reviewSellerVerification,
 } from "@/lib/db";
+import { auditLog } from "@/lib/admin-logger";
 
 export const runtime = "nodejs";
 
@@ -43,5 +44,13 @@ export async function PATCH(req: Request) {
   }
 
   await reviewSellerVerification(id, status, session.user.id, adminNotes);
+
+  await auditLog({
+    action:     status === "approved" ? "seller_approve" : "seller_reject",
+    targetType: "seller",
+    targetId:   id,
+    details:    adminNotes ? { adminNotes } : {},
+  });
+
   return NextResponse.json({ ok: true });
 }

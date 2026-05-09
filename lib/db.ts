@@ -54,11 +54,12 @@ export async function getUserById(id: string): Promise<User | null> {
 
 export async function getUserWithHash(
   email: string,
-): Promise<(User & { passwordHash: string | null; emailVerified: boolean }) | null> {
-  const rows = await query<User & { passwordHash: string | null; emailVerified: boolean }>(
+): Promise<(User & { passwordHash: string | null; emailVerified: boolean; isActive: boolean }) | null> {
+  const rows = await query<User & { passwordHash: string | null; emailVerified: boolean; isActive: boolean }>(
     `SELECT id, name, email, image, role,
             password_hash      AS "passwordHash",
             email_verified     AS "emailVerified",
+            COALESCE(is_active, TRUE) AS "isActive",
             created_at         AS "createdAt"
      FROM users WHERE email = $1 LIMIT 1`,
     [email],
@@ -1213,4 +1214,119 @@ export async function reviewSellerVerification(
       );
     }
   }
+}
+
+// ── User active status ─────────────────────────────────────────────────────
+
+export async function setUserActive(userId: string, isActive: boolean): Promise<void> {
+  await query(
+    `UPDATE users SET is_active = $1 WHERE id = $2`,
+    [isActive, userId],
+  );
+}
+
+export async function touchLastLogin(userId: string): Promise<void> {
+  await query(
+    `UPDATE users SET last_login = NOW() WHERE id = $1`,
+    [userId],
+  ).catch(() => {/* non-fatal — column may not exist yet */});
+}
+
+// ── Admin activity audit log ───────────────────────────────────────────────
+
+export interface AdminLog {
+  id: string;
+  adminId: string;
+  adminEmail: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
+export async function logAdminAction(data: {
+  adminId: string;
+  adminEmail: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  await query(
+    `INSERT INTO admin_logs
+       (admin_id, admin_email, action, target_type, target_id, details)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      data.adminId,
+      data.adminEmail,
+      data.action,
+      data.targetType,
+      data.targetId,
+      JSON.stringify(data.details ?? {}),
+    ],
+  ).catch((err) => {
+    // Table may not exist yet — fail silently rather than breaking admin actions
+    console.error("[admin-log] insert failed:", (err as Error).message);
+  });
+}
+
+export async function getAdminLogs(opts: {
+  limit?: number;
+  offset?: number;
+  action?: string;
+  adminId?: string;
+} = {}): Promise<AdminLog[]> {
+  const { limit = 50, offset = 0, action, adminId } = opts;
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (action) { conditions.push(`action = $${idx++}`); params.push(action); }
+  if (adminId) { conditions.push(`admin_id = $${idx++}`); params.push(adminId); }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  params.push(limit, offset);
+
+  const rows = await query<Record<string, unknown>>(
+    `SELECT id, admin_id AS "adminId", admin_email AS "adminEmail",
+            action, target_type AS "targetType", target_id AS "targetId",
+            details, created_at AS "createdAt"
+     FROM admin_logs
+     ${where}
+     ORDER BY created_at DESC
+     LIMIT $${idx} OFFSET $${idx + 1}`,
+    params,
+  );
+
+  return rows.map((r) => ({
+    id:          r.id as string,
+    adminId:     r.adminId as string,
+    adminEmail:  r.adminEmail as string,
+    action:      r.action as string,
+    targetType:  r.targetType as string,
+    targetId:    r.targetId as string,
+    details:     (r.details as Record<string, unknown>) ?? {},
+    createdAt:   r.createdAt as string,
+  }));
+}
+
+export async function getAdminLogCount(opts: {
+  action?: string;
+  adminId?: string;
+} = {}): Promise<number> {
+  const { action, adminId } = opts;
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (action) { conditions.push(`action = $${idx++}`); params.push(action); }
+  if (adminId) { conditions.push(`admin_id = $${idx++}`); params.push(adminId); }
+
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const rows = await query<{ count: string }>(
+    `SELECT COUNT(*)::TEXT AS count FROM admin_logs ${where}`,
+    params,
+  );
+  return Number(rows[0]?.count ?? 0);
 }

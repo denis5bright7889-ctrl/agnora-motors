@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { listDealers, updateDealerStatus } from "@/lib/db";
+import { auditLog } from "@/lib/admin-logger";
 
 export const runtime = "nodejs";
 
 async function requireAdmin() {
   const session = await auth();
-  if (!session?.user?.id || session.user.role !== "admin") {
-    return null;
-  }
+  if (!session?.user?.id || session.user.role !== "admin") return null;
   return session;
 }
 
@@ -23,13 +22,29 @@ export async function GET(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  if (!await requireAdmin()) {
+  const session = await requireAdmin();
+  if (!session) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const { id, status, rejectionReason } = await req.json();
+
+  const { id, status, rejectionReason } = await req.json() as {
+    id: string;
+    status: "approved" | "rejected";
+    rejectionReason?: string;
+  };
+
   if (!id || !["approved", "rejected"].includes(status)) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
+
   await updateDealerStatus(id, status, rejectionReason);
+
+  await auditLog({
+    action:     status === "approved" ? "dealer_approve" : "dealer_reject",
+    targetType: "dealer",
+    targetId:   id,
+    details:    rejectionReason ? { rejectionReason } : {},
+  });
+
   return NextResponse.json({ ok: true });
 }

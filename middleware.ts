@@ -11,11 +11,17 @@ export default auth((req) => {
   const { nextUrl } = req;
   const path        = nextUrl.pathname;
 
-  // Forward pathname to server-component layouts via a custom request header.
-  // This lets dealer/layout.tsx distinguish /dealer/register (public) from
-  // /dealer/dashboard (protected) without needing a usePathname() hook.
+  // Forward pathname + impersonation state to server-component layouts via
+  // custom request headers (readable via next/headers in server components).
   const reqHeaders = new Headers(req.headers);
   reqHeaders.set("x-pathname", path);
+
+  // If an admin has an active impersonation cookie, forward the target user ID
+  // so the admin layout can show the impersonation banner.
+  const impersonatingId = req.cookies.get("__agnora_imp")?.value;
+  if (impersonatingId && isLoggedIn && role === "admin") {
+    reqHeaders.set("x-impersonating", impersonatingId);
+  }
 
   const isPrivateDash = path.startsWith("/private-dashboard");
   // /dealer/register is a public sign-up page — anyone can apply.

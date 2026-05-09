@@ -107,6 +107,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             return null;
           }
 
+          if (user.isActive === false) {
+            console.log("[authorize] db: account deactivated for %s", email);
+            return null;
+          }
+
           return {
             id:    user.id,
             email: user.email,
