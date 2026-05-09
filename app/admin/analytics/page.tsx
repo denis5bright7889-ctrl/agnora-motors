@@ -1,6 +1,5 @@
 import {
-  TrendingUp, Users, Car, DollarSign,
-  Clock, BarChart3, Activity,
+  Car, BarChart3, Activity,
 } from "lucide-react";
 import {
   getAdminStats, getTotalRevenue,
@@ -11,6 +10,7 @@ import {
 } from "@/lib/db";
 import { formatPrice } from "@/lib/utils";
 import { ListingsTable } from "./listings-table";
+import { LiveDashboard } from "./live-dashboard";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -221,6 +221,16 @@ export default async function AdminAnalyticsPage() {
   // Views sparkline for 30-day activity
   const maxViews = Math.max(...dailyViews.map((d) => Number(d.views)), 1);
 
+  // Build initial snapshot for the LiveDashboard client component so the
+  // page does not flash empty KPIs while the first SSE message arrives.
+  const initialSnapshot = {
+    timestamp:       new Date().toISOString(),
+    stats,
+    totalRevenue,
+    statusBreakdown,
+    topDealers:      topDealers.slice(0, 5),
+  };
+
   return (
     <div className="space-y-10 max-w-7xl">
 
@@ -229,38 +239,18 @@ export default async function AdminAnalyticsPage() {
         <div>
           <h1 className="font-display text-3xl font-medium">Analytics</h1>
           <p className="text-sm text-muted mt-1">
-            {dbUp ? "Live data from your Neon database" : "⚠ No database — connect one for live analytics"}
+            {dbUp ? "Real-time · KPIs and status update automatically" : "⚠ No database — connect one for live analytics"}
           </p>
         </div>
         <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-muted">
           <Activity className="h-3 w-3" />
-          {dbUp ? "DB connected" : "DB offline"}
+          {dbUp ? "SSE stream" : "DB offline"}
         </span>
       </div>
 
-      {/* ── KPI row ── */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <KpiCard
-          icon={DollarSign}
-          label="Total revenue"
-          value={`KSh ${formatPrice(totalRevenue)}`}
-          sub="From sold listings"
-          accent
-        />
-        <KpiCard icon={Car}   label="Total listings" value={stats.totalCars.toLocaleString()} />
-        <KpiCard icon={Users} label="Total users"    value={stats.totalUsers.toLocaleString()} />
-        <KpiCard
-          icon={TrendingUp}
-          label="Active dealers"
-          value={stats.totalDealers.toLocaleString()}
-        />
-        <KpiCard
-          icon={Clock}
-          label="Pending approvals"
-          value={stats.pendingDealers.toLocaleString()}
-          sub="Dealer applications"
-        />
-      </div>
+      {/* ── Live section (KPIs + status donut + event feed + dealer table) ──
+          Server renders initial data; client subscribes to SSE and updates. */}
+      <LiveDashboard initial={initialSnapshot} />
 
       {/* ── Charts row ── */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -277,21 +267,6 @@ export default async function AdminAnalyticsPage() {
           />
         </div>
 
-        {/* Listing status — donut */}
-        <div className="rounded-2xl border border-border bg-surface p-6">
-          <h2 className="font-semibold text-sm mb-5">Listings by status</h2>
-          <div className="flex flex-col items-center gap-5">
-            <DonutChart segments={donutSegments} />
-            <div className="w-full space-y-2">
-              {donutSegments.map((seg) => (
-                <Legend key={seg.label} color={seg.color} label={seg.label} value={seg.value} />
-              ))}
-              {donutSegments.length === 0 && (
-                <p className="text-xs text-muted text-center">No listings yet</p>
-              )}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* ── User growth + Views row ── */}
@@ -343,45 +318,7 @@ export default async function AdminAnalyticsPage() {
         </div>
       </div>
 
-      {/* ── Dealer leaderboard ── */}
-      {topDealers.length > 0 && (
-        <div className="rounded-2xl border border-border bg-surface">
-          <div className="flex items-center gap-2 px-5 py-4 border-b border-border">
-            <TrendingUp className="h-4 w-4 text-muted" />
-            <h2 className="font-semibold text-sm">Top dealers by activity</h2>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-surface-2">
-                  {["#", "Dealer", "Location", "Total", "Active", "Sold", "Revenue (KSh)"].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {topDealers.map((d, i) => (
-                  <tr key={d.dealerId} className="border-b border-border last:border-0 hover:bg-surface-2/60 transition-colors">
-                    <td className="px-4 py-3 text-muted/50 font-display">{i + 1}</td>
-                    <td className="px-4 py-3 font-medium">{d.businessName}</td>
-                    <td className="px-4 py-3 text-muted text-xs">{d.location}</td>
-                    <td className="px-4 py-3 tabular-nums">{d.totalListings}</td>
-                    <td className="px-4 py-3 tabular-nums text-green-500">{d.activeListings}</td>
-                    <td className="px-4 py-3 tabular-nums text-blue-400">{d.soldListings}</td>
-                    <td className="px-4 py-3 tabular-nums font-medium text-accent">
-                      {d.revenue > 0 ? formatPrice(d.revenue) : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── Listings table ── */}
+      {/* ── Listings table (static, server-rendered) ── */}
       <div className="space-y-4">
         <div className="flex items-center gap-2">
           <Car className="h-4 w-4 text-muted" />

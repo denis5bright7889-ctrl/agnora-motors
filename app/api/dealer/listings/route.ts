@@ -6,6 +6,7 @@ import {
   getDealerCars,
   deleteDealerCar,
 } from "@/lib/db";
+import { publishEvent } from "@/lib/realtime";
 
 export const runtime = "nodejs";
 
@@ -38,6 +39,10 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const car = await createDealerCar(dealer.id, body);
+    publishEvent("listing_created", {
+      carId: car.id, make: car.make, model: car.model,
+      year: car.year, price: car.price, dealerId: dealer.id,
+    }).catch(() => {});
     return NextResponse.json({ car }, { status: 201 });
   } catch (err) {
     console.error(err);

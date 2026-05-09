@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getUserByEmail, createUser, setVerificationCode, markUserEmailVerified, isDbConfigured } from "@/lib/db";
 import { findLocalUser, createLocalUser } from "@/lib/local-users";
 import { sendVerificationEmail } from "@/lib/email";
+import { publishEvent } from "@/lib/realtime";
 
 export const runtime = "nodejs";
 
@@ -34,6 +35,7 @@ async function registerDealer(data: Input) {
   const passwordHash = await bcrypt.hash(data.password, 12);
   const user = await createUser({ email: data.email, name: data.name, passwordHash, role: "dealer" });
   await markUserEmailVerified(user.id);
+  publishEvent("user_registered", { email: data.email, role: "dealer" }).catch(() => {});
   return NextResponse.json({ user: { id: user.id, email: user.email }, verified: true }, { status: 201 });
 }
 
@@ -57,6 +59,9 @@ async function registerBuyer(data: Input) {
       { status: 201 },
     );
   }
+
+  // Notify real-time stream — non-blocking, never fails the registration
+  publishEvent("user_registered", { email: data.email, role: "buyer" }).catch(() => {});
 
   return NextResponse.json(
     { user: { id: user.id, email: user.email }, verificationSent: true, verified: false },
