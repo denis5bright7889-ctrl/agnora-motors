@@ -7,26 +7,34 @@ const { auth } = NextAuth(authConfig);
 export default auth((req) => {
   const isLoggedIn = !!req.auth;
   const role       = req.auth?.user?.role;
-  // emailVerified is now forwarded by auth.config.ts session callback — without
-  // that fix this was always undefined and every user looped back to /verify-email.
   const isVerified = !!req.auth?.user?.emailVerified;
   const { nextUrl } = req;
   const path        = nextUrl.pathname;
 
+  // Forward pathname to server-component layouts via a custom request header.
+  // This lets dealer/layout.tsx distinguish /dealer/register (public) from
+  // /dealer/dashboard (protected) without needing a usePathname() hook.
+  const reqHeaders = new Headers(req.headers);
+  reqHeaders.set("x-pathname", path);
+
   const isPrivateDash = path.startsWith("/private-dashboard");
-  const isDealerDash  = path.startsWith("/dealer-dashboard") || path.startsWith("/dealer/");
+  // /dealer/register is a public sign-up page — anyone can apply.
+  // Exclude it from the dealer-dashboard protection group.
+  const isDealerDash  =
+    path.startsWith("/dealer-dashboard") ||
+    (path.startsWith("/dealer/") && !path.startsWith("/dealer/register"));
   const isAdminDash   = path.startsWith("/admin");
 
-  // ── Unauthenticated users → login ────────────────────────────────────────
+  // ── Unauthenticated → login ────────────────────────────────────────────────
   if ((isPrivateDash || isDealerDash || isAdminDash) && !isLoggedIn) {
     const loginUrl = new URL("/login", nextUrl);
     loginUrl.searchParams.set("next", path);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (!isLoggedIn) return NextResponse.next();
+  if (!isLoggedIn) return NextResponse.next({ request: { headers: reqHeaders } });
 
-  // ── Email verification gate (dashboard routes only) ───────────────────────
+  // ── Email verification gate (dashboard routes only) ────────────────────────
   const needsVerify = isPrivateDash || isDealerDash;
   if (needsVerify && !isVerified && !path.startsWith("/verify-email")) {
     const verifyUrl = new URL("/verify-email", nextUrl);
@@ -34,7 +42,7 @@ export default auth((req) => {
     return NextResponse.redirect(verifyUrl);
   }
 
-  // ── Role enforcement ──────────────────────────────────────────────────────
+  // ── Role enforcement ───────────────────────────────────────────────────────
   if (isAdminDash && role !== "admin") {
     return NextResponse.redirect(new URL("/", nextUrl));
   }
@@ -47,7 +55,7 @@ export default auth((req) => {
     return NextResponse.redirect(new URL("/private-dashboard", nextUrl));
   }
 
-  return NextResponse.next();
+  return NextResponse.next({ request: { headers: reqHeaders } });
 });
 
 export const config = {

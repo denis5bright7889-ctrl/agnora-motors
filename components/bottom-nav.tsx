@@ -32,7 +32,14 @@ export function BottomNav() {
 
   if (HIDDEN_ON.some((p) => pathname?.startsWith(p))) return null;
 
-  const items: NavItem[] = [...BASE_ITEMS];
+  const role     = session?.user?.role;
+  const isDealer = role === "dealer";
+  const isPrivate = role === "private_seller";
+  const sellHref = (isDealer || isPrivate) ? "/dealer/listings/new" : "/sell";
+
+  const items: NavItem[] = BASE_ITEMS.map((i) =>
+    i.label === "Sell" ? { ...i, href: sellHref } : i,
+  );
 
   return (
     <nav

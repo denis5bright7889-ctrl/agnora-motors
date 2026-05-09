@@ -141,10 +141,10 @@ export default function DealerRegisterPage() {
             You'll receive an email once approved.
           </p>
           <Link
-            href="/"
+            href="/dealer/dashboard"
             className="inline-flex h-12 items-center gap-2 rounded-full bg-foreground px-7 text-sm font-semibold text-background hover:opacity-90 transition-opacity"
           >
-            Back to Agnora
+            Go to your dashboard
           </Link>
         </div>
       </div>

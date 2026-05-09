@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { auth } from "@/auth";
 import {
   LayoutDashboard, Car, PlusCircle, LogOut,
@@ -23,6 +24,17 @@ const NAV = [
 ];
 
 export default async function DealerLayout({ children }: { children: React.ReactNode }) {
+  const pathname = (await headers()).get("x-pathname") ?? "";
+
+  // /dealer/register is a public sign-up page — any role (including buyer)
+  // or unauthenticated users can access it. If the user is already a dealer,
+  // skip the form and take them straight to their dashboard.
+  if (pathname.startsWith("/dealer/register")) {
+    const session = await auth();
+    if (session?.user?.role === "dealer") redirect("/dealer/dashboard");
+    return <>{children}</>;
+  }
+
   const session = await auth();
   if (!session) redirect("/login");
 

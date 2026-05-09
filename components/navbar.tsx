@@ -11,9 +11,9 @@ import { cn } from "@/lib/utils";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 
-const NAV_LINKS = [
+const STATIC_NAV_LINKS = [
   { href: "/cars",     label: "Buy" },
-  { href: "/sell",     label: "Sell" },
+  { href: "/sell",     label: "Sell" },   // href overridden per-role below
   { href: "/finance",  label: "Finance" },
   { href: "/research", label: "Research" },
 ];
@@ -50,6 +50,13 @@ export function Navbar() {
   const isPrivate   = role === "private_seller";
   const dashHref    = isAdmin ? "/admin" : isDealer ? "/dealer-dashboard" : "/private-dashboard";
   const initial     = session?.user?.name?.[0]?.toUpperCase() ?? "?";
+
+  // Dealers and private sellers go straight to "add listing" when they click Sell.
+  // Everyone else sees the /sell landing page.
+  const sellHref = (isDealer || isPrivate) ? "/dealer/listings/new" : "/sell";
+  const NAV_LINKS = STATIC_NAV_LINKS.map((l) =>
+    l.label === "Sell" ? { ...l, href: sellHref } : l,
+  );
 
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
