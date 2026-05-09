@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 
 const { auth } = NextAuth(authConfig);
 
-export default auth((req) => {
+export const proxy = auth((req) => {
   const isLoggedIn = !!req.auth;
   const role       = req.auth?.user?.role;
   const isVerified = !!req.auth?.user?.emailVerified;
@@ -27,7 +27,7 @@ export default auth((req) => {
   // Admins have unrestricted access to every route — skip all role/verify
   // checks. This is enforced server-side only; the role is set in auth.ts.
   if (isLoggedIn && role === "admin") {
-    console.log("[middleware] ADMIN BYPASS ACTIVE path=%s email=%s",
+    console.log("[proxy] ADMIN BYPASS ACTIVE path=%s email=%s",
       path, req.auth?.user?.email ?? "unknown");
     return NextResponse.next({ request: { headers: reqHeaders } });
   }
