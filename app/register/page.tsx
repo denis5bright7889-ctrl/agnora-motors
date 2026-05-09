@@ -67,8 +67,12 @@ export default function RegisterPage() {
       }
       router.push("/");
     } else {
-      // DB users must verify their email first
-      router.push(`/verify-email?email=${encodeURIComponent(data.email)}`);
+      // DB users must verify their email first.
+      // If email delivery failed (verificationSent: false), pass a flag so the
+      // verify-email page can prompt the user to hit "Resend code" immediately.
+      const params = new URLSearchParams({ email: data.email });
+      if (json.verificationSent === false) params.set("emailError", "1");
+      router.push(`/verify-email?${params.toString()}`);
     }
   }
 

@@ -31,11 +31,13 @@ export async function POST(req: Request) {
 
     const code = randomCode();
     await setVerificationCode(parsed.data.email, code);
+    console.log("[resend-verification] OTP saved for email=%s", parsed.data.email);
+
     await sendVerificationEmail(parsed.data.email, user.name ?? "there", code);
 
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[resend-verification]", err);
-    return NextResponse.json({ error: "Failed to resend code" }, { status: 500 });
+    console.error("[resend-verification] failed:", err);
+    return NextResponse.json({ error: "Failed to send verification code. Please try again." }, { status: 500 });
   }
 }

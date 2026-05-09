@@ -10,6 +10,7 @@ function VerifyEmailForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get("email") ?? "";
+  const emailFailed = searchParams.get("emailError") === "1";
 
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
@@ -18,6 +19,7 @@ function VerifyEmailForm() {
   const [resent, setResent] = useState(false);
   const [success, setSuccess] = useState(false);
   const refs = useRef<(HTMLInputElement | null)[]>([]);
+  const SLOT_IDS = ["otp-0", "otp-1", "otp-2", "otp-3", "otp-4", "otp-5"] as const;
 
   const code = digits.join("");
 
@@ -57,19 +59,26 @@ function VerifyEmailForm() {
     setResent(false);
     setError("");
     try {
-      await fetch("/api/auth/resend-verification", {
+      const res = await fetch("/api/auth/resend-verification", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      setResent(true);
+      const json = await res.json() as { ok?: boolean; error?: string };
+      if (res.ok) {
+        setResent(true);
+      } else {
+        setError(json.error ?? "Failed to resend code. Please try again.");
+      }
+    } catch {
+      setError("Network error. Please check your connection and try again.");
     } finally {
       setResending(false);
     }
   }
 
   function onDigitChange(i: number, value: string) {
-    const v = value.replace(/\D/g, "").slice(-1);
+    const v = value.replaceAll(/\D/g, "").slice(-1);
     const next = [...digits];
     next[i] = v;
     setDigits(next);
@@ -84,7 +93,7 @@ function VerifyEmailForm() {
 
   function onPaste(e: React.ClipboardEvent) {
     e.preventDefault();
-    const text = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    const text = e.clipboardData.getData("text").replaceAll(/\D/g, "").slice(0, 6);
     if (text.length === 6) {
       setDigits(text.split(""));
     }
@@ -110,6 +119,12 @@ function VerifyEmailForm() {
       </p>
       <p className="text-sm font-semibold mb-7 truncate">{email || "your email"}</p>
 
+      {emailFailed && !resent && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-3 text-sm text-amber-600 dark:text-amber-400">
+          <RefreshCw className="h-4 w-4 shrink-0" />
+          We couldn&apos;t send the code. Tap <strong className="mx-1">Resend code</strong> below to try again.
+        </div>
+      )}
       {error && (
         <div className="mb-4 flex items-center gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
           <X className="h-4 w-4 shrink-0" />
@@ -127,7 +142,7 @@ function VerifyEmailForm() {
       <div className="flex gap-2 justify-center mb-6" onPaste={onPaste}>
         {digits.map((d, i) => (
           <input
-            key={i}
+            key={SLOT_IDS[i]}
             ref={(el) => { refs.current[i] = el; }}
             type="text"
             inputMode="numeric"

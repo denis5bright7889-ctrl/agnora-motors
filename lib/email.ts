@@ -2,19 +2,24 @@ import { Resend } from "resend";
 
 let _resend: Resend | null = null;
 function getResend() {
-  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY ?? "");
+  _resend ??= new Resend(process.env.RESEND_API_KEY);
   return _resend;
 }
 
+const FROM = "Agnora Motors <support@agnora-motors.com>";
+
 export async function sendVerificationEmail(to: string, name: string, code: string): Promise<void> {
   if (!process.env.RESEND_API_KEY) {
-    console.log(`[email] RESEND_API_KEY not set — verification code for ${to}: ${code}`);
-    return;
+    console.error("[email] RESEND_API_KEY is not set — cannot send verification email");
+    throw new Error("Email service is not configured");
   }
-  await getResend().emails.send({
-    from: "Agnora Motors <noreply@agnora.co.ke>",
+
+  console.log("[email] sending verification to=%s", to);
+
+  const { data, error } = await getResend().emails.send({
+    from: FROM,
     to,
-    subject: "Verify your Agnora account",
+    subject: "Your Agnora verification code",
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#fff">
         <div style="margin-bottom:24px">
@@ -34,4 +39,11 @@ export async function sendVerificationEmail(to: string, name: string, code: stri
       </div>
     `,
   });
+
+  if (error) {
+    console.error("[email] Resend error to=%s error=%s", to, JSON.stringify(error));
+    throw new Error(`Email delivery failed: ${(error as { message?: string }).message ?? JSON.stringify(error)}`);
+  }
+
+  console.log("[email] sent successfully id=%s to=%s", data?.id, to);
 }

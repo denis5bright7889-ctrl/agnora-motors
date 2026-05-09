@@ -4,20 +4,8 @@
   "installCommand": "npm install",
   "crons": [
     {
-      "path": "/api/cron/fetch-kenya-news",
-      "schedule": "0 */2 * * *"
-    },
-    {
-      "path": "/api/cron/fetch-eastafrica-news",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/cron/fetch-africa-news",
-      "schedule": "0 */12 * * *"
-    },
-    {
-      "path": "/api/cron/fetch-global-news",
-      "schedule": "0 6 * * *"
+      "path": "/api/cron",
+      "schedule": "0 0 * * *"
     }
   ]
 }
