@@ -1330,3 +1330,147 @@ export async function getAdminLogCount(opts: {
   );
   return Number(rows[0]?.count ?? 0);
 }
+
+// ── Analytics — revenue ────────────────────────────────────────────────────
+
+export async function getTotalRevenue(): Promise<number> {
+  const rows = await query<{ revenue: string }>(
+    `SELECT COALESCE(SUM(price), 0)::TEXT AS revenue FROM cars WHERE status = 'sold'`,
+  );
+  return Number(rows[0]?.revenue ?? 0);
+}
+
+export async function getRevenueByMonth(months = 6): Promise<{ month: string; revenue: number }[]> {
+  const rows = await query<{ month: string; revenue: string }>(
+    `SELECT TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS month,
+            COALESCE(SUM(price), 0)::TEXT AS revenue
+     FROM cars
+     WHERE status = 'sold'
+       AND created_at >= NOW() - ($1::INT * INTERVAL '1 month')
+     GROUP BY DATE_TRUNC('month', created_at)
+     ORDER BY month ASC`,
+    [months],
+  );
+  return rows.map((r) => ({ month: r.month, revenue: Number(r.revenue) }));
+}
+
+// ── Analytics — users ──────────────────────────────────────────────────────
+
+export async function getUserGrowthByMonth(months = 6): Promise<{ month: string; count: number }[]> {
+  const rows = await query<{ month: string; count: string }>(
+    `SELECT TO_CHAR(DATE_TRUNC('month', created_at), 'YYYY-MM') AS month,
+            COUNT(*)::TEXT AS count
+     FROM users
+     WHERE created_at >= NOW() - ($1::INT * INTERVAL '1 month')
+     GROUP BY DATE_TRUNC('month', created_at)
+     ORDER BY month ASC`,
+    [months],
+  );
+  return rows.map((r) => ({ month: r.month, count: Number(r.count) }));
+}
+
+// ── Analytics — listings ───────────────────────────────────────────────────
+
+export async function getListingStatusBreakdown(): Promise<{ status: string; count: number }[]> {
+  const rows = await query<{ status: string; count: string }>(
+    `SELECT status, COUNT(*)::TEXT AS count FROM cars GROUP BY status ORDER BY count::INT DESC`,
+  );
+  return rows.map((r) => ({ status: r.status, count: Number(r.count) }));
+}
+
+export interface AdminListingRow {
+  id: string;
+  year: number;
+  make: string;
+  model: string;
+  price: number;
+  status: string;
+  location: string;
+  createdAt: string;
+  views: number;
+  dealerName: string | null;
+}
+
+export async function getAdminListingsTable(opts: {
+  status?: string;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<AdminListingRow[]> {
+  const { status, limit = 50, offset = 0 } = opts;
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  let idx = 1;
+
+  if (status) { conditions.push(`c.status = $${idx++}`); params.push(status); }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  params.push(limit, offset);
+
+  const rows = await query<Record<string, unknown>>(
+    `SELECT c.id, c.year, c.make, c.model, c.price::BIGINT AS price, c.status,
+            c.location, c.created_at AS "createdAt",
+            COALESCE(COUNT(v.id), 0)::INT AS views,
+            d.business_name AS "dealerName"
+     FROM cars c
+     LEFT JOIN dealers d ON d.id = c.dealer_id
+     LEFT JOIN car_views v ON v.car_id = c.id
+     ${where}
+     GROUP BY c.id, d.business_name
+     ORDER BY c.created_at DESC
+     LIMIT $${idx} OFFSET $${idx + 1}`,
+    params,
+  );
+
+  return rows.map((r) => ({
+    id:         r.id as string,
+    year:       r.year as number,
+    make:       r.make as string,
+    model:      r.model as string,
+    price:      Number(r.price),
+    status:     r.status as string,
+    location:   r.location as string,
+    createdAt:  r.createdAt as string,
+    views:      r.views as number,
+    dealerName: (r.dealerName as string | null) ?? null,
+  }));
+}
+
+// ── Analytics — dealers ────────────────────────────────────────────────────
+
+export interface DealerActivity {
+  dealerId: string;
+  businessName: string;
+  location: string;
+  totalListings: number;
+  activeListings: number;
+  soldListings: number;
+  revenue: number;
+}
+
+export async function getTopDealersByActivity(limit = 10): Promise<DealerActivity[]> {
+  const rows = await query<Record<string, unknown>>(
+    `SELECT d.id                                        AS "dealerId",
+            d.business_name                             AS "businessName",
+            d.location,
+            COUNT(c.id)::INT                            AS "totalListings",
+            COUNT(CASE WHEN c.status='active' THEN 1 END)::INT AS "activeListings",
+            COUNT(CASE WHEN c.status='sold'   THEN 1 END)::INT AS "soldListings",
+            COALESCE(SUM(CASE WHEN c.status='sold' THEN c.price ELSE 0 END),0)::BIGINT AS revenue
+     FROM dealers d
+     LEFT JOIN cars c ON c.dealer_id = d.id
+     WHERE d.status = 'approved'
+     GROUP BY d.id, d.business_name, d.location
+     ORDER BY "totalListings" DESC
+     LIMIT $1`,
+    [limit],
+  );
+
+  return rows.map((r) => ({
+    dealerId:      r.dealerId as string,
+    businessName:  r.businessName as string,
+    location:      r.location as string,
+    totalListings: r.totalListings as number,
+    activeListings: r.activeListings as number,
+    soldListings:  r.soldListings as number,
+    revenue:       Number(r.revenue),
+  }));
+}
