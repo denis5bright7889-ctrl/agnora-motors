@@ -3,39 +3,40 @@ import Anthropic from "@anthropic-ai/sdk";
 import { auth } from "@/auth";
 import { getSubscription, isDbConfigured } from "@/lib/db";
 import { canUseAiChat } from "@/lib/subscriptions";
+import { DEALER_SYSTEM_PROMPT } from "@/lib/ai";
 
-export const runtime = "nodejs";
+export const runtime    = "nodejs";
+export const maxDuration = 60;
 
 const anthropic = new Anthropic();
 
-// Stable system prompt — cached with ephemeral cache_control (5-min TTL)
-const SYSTEM_PROMPT = `You are an AI car buying assistant for Agnora Motors, Kenya's premier car marketplace. Help buyers make confident, informed decisions.
-
-You can:
-- Answer questions about specific car listings (year, make, mileage, condition, features, price)
-- Explain technical details in plain language (engine specs, fuel types, transmission, body types)
-- Advise what to check on a test drive and what warning signs to watch for
-- Give context on Kenyan market pricing, common models, and import history
-- Help buyers understand financing or hire-purchase options
-- Facilitate connecting the buyer with the seller or dealer
-
-When car or seller details are provided in the context, reference them specifically.
-Be friendly, honest, and concise. Encourage in-person inspection and mention Agnora's verified inspection service for peace of mind.
-If you don't have enough information to answer accurately, say so and suggest the buyer contact the seller directly.`;
+// Keep last 20 turns to stay within token budget
+const MAX_HISTORY   = 20;
+const MAX_MSG_CHARS = 4_000;
 
 export async function POST(req: Request) {
-  // Auth check
+  // ── 1. Auth ────────────────────────────────────────────────────────────────
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
 
-  // Plan gate — AI chat requires Pro or Premium
-  if (isDbConfigured()) {
+  const { role } = session.user;
+
+  // Only dealers, private sellers, and admins can use the dealer AI assistant
+  if (role !== "dealer" && role !== "private_seller" && role !== "admin") {
+    return NextResponse.json(
+      { error: "AI assistant is available for dealers and sellers only." },
+      { status: 403 },
+    );
+  }
+
+  // ── 2. Subscription gate (admins bypass) ───────────────────────────────────
+  if (role !== "admin" && isDbConfigured()) {
     try {
-      const sub = await getSubscription(session.user.id);
+      const sub   = await getSubscription(session.user.id);
       const planId = (sub?.plan ?? "free") as "free" | "pro" | "premium";
-      const gate = canUseAiChat(planId);
+      const gate  = canUseAiChat(planId);
       if (!gate.allowed) {
         return NextResponse.json(
           { error: gate.reason ?? "AI chat requires a Pro or Premium plan." },
@@ -43,14 +44,14 @@ export async function POST(req: Request) {
         );
       }
     } catch {
-      // DB check failed — fail open so UX isn't broken
+      // DB check failed — fail open so the UX isn't broken
     }
   }
 
+  // ── 3. Parse + sanitise body ───────────────────────────────────────────────
   let body: {
-    messages?: { role: "user" | "assistant"; content: string }[];
-    carDetails?: Record<string, unknown>;
-    sellerInfo?: Record<string, unknown>;
+    messages?:   { role: "user" | "assistant"; content: string }[];
+    dealerCtx?:  Record<string, unknown>;
   };
 
   try {
@@ -59,43 +60,56 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { messages, carDetails, sellerInfo } = body;
+  const rawMessages = body.messages ?? [];
 
-  if (!messages?.length) {
+  if (!rawMessages.length) {
     return NextResponse.json({ error: "messages array is required" }, { status: 400 });
   }
 
-  // Build system content — stable prompt cached, dynamic context not cached
+  const messages = rawMessages
+    .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+    .slice(-MAX_HISTORY)
+    .map((m) => ({
+      role:    m.role as "user" | "assistant",
+      content: m.content.trim().slice(0, MAX_MSG_CHARS),
+    }));
+
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "user" || !last.content) {
+    return NextResponse.json({ error: "Last message must be a non-empty user message" }, { status: 400 });
+  }
+
+  // ── 4. Build system content ────────────────────────────────────────────────
+  // The dealer system prompt is stable — cache it with Anthropic's ephemeral
+  // prompt caching to save tokens on repeated calls (5-min TTL, ~90% savings).
   const systemContent: Anthropic.TextBlockParam[] = [
     {
-      type: "text",
-      text: SYSTEM_PROMPT,
+      type:          "text",
+      text:          DEALER_SYSTEM_PROMPT,
       cache_control: { type: "ephemeral" },
     },
   ];
 
-  if (carDetails || sellerInfo) {
-    const parts: string[] = [];
-    if (carDetails) {
-      parts.push(`<car_listing>\n${JSON.stringify(carDetails, null, 2)}\n</car_listing>`);
-    }
-    if (sellerInfo) {
-      parts.push(`<seller_info>\n${JSON.stringify(sellerInfo, null, 2)}\n</seller_info>`);
-    }
-    systemContent.push({ type: "text", text: parts.join("\n\n") });
+  // Inject dealer context (their listings, profile) if provided — not cached
+  if (body.dealerCtx && Object.keys(body.dealerCtx).length > 0) {
+    systemContent.push({
+      type: "text",
+      text: `<dealer_context>\n${JSON.stringify(body.dealerCtx, null, 2)}\n</dealer_context>`,
+    });
   }
 
-  // Stream the response from Claude Haiku 4.5
+  // ── 5. Stream from Claude ──────────────────────────────────────────────────
   const claudeStream = anthropic.messages.stream({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    system: systemContent as Anthropic.TextBlockParam[],
-    messages: messages as Anthropic.MessageParam[],
+    model:      "claude-haiku-4-5-20251001",
+    max_tokens: 1_024,
+    system:     systemContent,
+    messages:   messages as Anthropic.MessageParam[],
   });
+
+  const encoder = new TextEncoder();
 
   const readableStream = new ReadableStream({
     async start(controller) {
-      const encoder = new TextEncoder();
       try {
         for await (const event of claudeStream) {
           if (
@@ -105,9 +119,16 @@ export async function POST(req: Request) {
             controller.enqueue(encoder.encode(event.delta.text));
           }
         }
-        controller.close();
+        console.log("[ai-chat] stream complete userId=%s role=%s", session.user.id, role);
       } catch (err) {
-        controller.error(err);
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[ai-chat] error:", msg);
+        const friendly = msg.includes("api_key") || msg.includes("auth")
+          ? "AI service is misconfigured. Contact support."
+          : "I ran into a temporary error — please try again.";
+        controller.enqueue(encoder.encode(friendly));
+      } finally {
+        controller.close();
       }
     },
     cancel() {
@@ -117,8 +138,8 @@ export async function POST(req: Request) {
 
   return new Response(readableStream, {
     headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache, no-store",
+      "Content-Type":      "text/plain; charset=utf-8",
+      "Cache-Control":     "no-cache, no-store",
       "X-Accel-Buffering": "no",
     },
   });
