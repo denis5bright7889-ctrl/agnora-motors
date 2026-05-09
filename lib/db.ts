@@ -69,7 +69,7 @@ export async function getUserWithHash(
 export async function setVerificationCode(email: string, code: string): Promise<void> {
   await query(
     `UPDATE users
-     SET verification_code = $1, verification_expires_at = NOW() + INTERVAL '30 minutes'
+     SET verification_code = $1, verification_expires_at = NOW() + INTERVAL '15 minutes'
      WHERE email = $2`,
     [code, email],
   );

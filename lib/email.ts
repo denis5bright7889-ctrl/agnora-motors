@@ -14,30 +14,14 @@ export async function sendVerificationEmail(to: string, name: string, code: stri
     throw new Error("Email service is not configured");
   }
 
-  console.log("[email] sending verification to=%s", to);
+  console.log("[email] OTP generated for=%s code=%s", to, code);
+  console.log("[email] Sending email to=%s", to);
 
   const { data, error } = await getResend().emails.send({
     from: FROM,
     to,
     subject: "Your Agnora verification code",
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#fff">
-        <div style="margin-bottom:24px">
-          <span style="display:inline-flex;align-items:center;gap:6px;font-size:18px;font-weight:600">
-            <span style="width:10px;height:10px;border-radius:50%;background:#FF4D2E;display:inline-block"></span>
-            Agnora<span style="color:#FF4D2E">.</span>
-          </span>
-        </div>
-        <h2 style="margin:0 0 8px;font-size:22px;font-weight:600">Verify your email</h2>
-        <p style="color:#666;margin-bottom:4px">Hi ${name},</p>
-        <p style="color:#666;margin-bottom:20px">Use the code below to verify your Agnora account:</p>
-        <div style="font-size:38px;font-weight:700;letter-spacing:10px;text-align:center;padding:24px;background:#f7f7f7;border-radius:12px;margin-bottom:20px;color:#111">
-          ${code}
-        </div>
-        <p style="color:#888;font-size:13px;margin-bottom:8px">This code expires in <strong>30 minutes</strong>.</p>
-        <p style="color:#aaa;font-size:12px">If you didn't create an Agnora account, you can safely ignore this email.</p>
-      </div>
-    `,
+    html: buildOtpEmail(name, code),
   });
 
   if (error) {
@@ -45,5 +29,131 @@ export async function sendVerificationEmail(to: string, name: string, code: stri
     throw new Error(`Email delivery failed: ${(error as { message?: string }).message ?? JSON.stringify(error)}`);
   }
 
-  console.log("[email] sent successfully id=%s to=%s", data?.id, to);
+  console.log("[email] Email sent successfully id=%s to=%s", data?.id, to);
+}
+
+function buildOtpEmail(name: string, code: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Verification code</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+
+  <!-- Outer wrapper -->
+  <table width="100%" cellpadding="0" cellspacing="0" border="0"
+         style="background-color:#f2f2f3;padding:48px 16px 64px;">
+    <tr>
+      <td align="center">
+
+        <!-- Card -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"
+               style="max-width:520px;background-color:#ffffff;border-radius:12px;
+                      border:1px solid #e4e4e7;overflow:hidden;">
+
+          <!-- ── Header ───────────────────────────────────────────── -->
+          <tr>
+            <td style="padding:28px 40px 24px;border-bottom:1px solid #f0f0f0;">
+              <table cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="width:10px;height:10px;background-color:#FF4D2E;
+                             border-radius:50%;vertical-align:middle;"></td>
+                  <td style="padding-left:8px;font-size:17px;font-weight:700;
+                             color:#111111;letter-spacing:-0.3px;vertical-align:middle;">
+                    Agnora<span style="color:#FF4D2E;">.</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- ── Body ────────────────────────────────────────────── -->
+          <tr>
+            <td style="padding:36px 40px 32px;">
+
+              <!-- Title -->
+              <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;
+                         color:#111111;letter-spacing:-0.4px;line-height:1.2;">
+                Verification code
+              </h1>
+
+              <!-- Intro -->
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#555555;">
+                Hi ${name.trim() || "there"}, confirm it&rsquo;s you.<br/>
+                Enter the code below to verify your email and continue
+                signing in to Agnora Motors.
+              </p>
+
+              <!-- OTP block -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="margin-bottom:12px;">
+                <tr>
+                  <td align="center"
+                      style="background-color:#f7f7f8;border:1px solid #e4e4e7;
+                             border-radius:10px;padding:28px 16px;">
+                    <span style="font-size:40px;font-weight:800;letter-spacing:14px;
+                                 color:#111111;font-variant-numeric:tabular-nums;
+                                 display:inline-block;padding-left:14px;">
+                      ${code}
+                    </span>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Expiry -->
+              <p style="margin:0 0 28px;font-size:13px;color:#999999;text-align:center;">
+                Expires in <strong style="color:#555555;">15 minutes</strong>
+              </p>
+
+              <!-- Divider -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="margin-bottom:24px;">
+                <tr><td style="border-top:1px solid #f0f0f0;font-size:0;line-height:0;">&nbsp;</td></tr>
+              </table>
+
+              <!-- Security note -->
+              <p style="margin:0 0 14px;font-size:13px;line-height:1.65;color:#888888;">
+                <strong style="color:#444444;">For your security</strong>, never share this code
+                with anyone &mdash; not even Agnora Motors staff. We will never ask you for it.
+              </p>
+
+              <!-- Ignore note -->
+              <p style="margin:0 0 14px;font-size:13px;line-height:1.65;color:#888888;">
+                If you didn&rsquo;t request this code, you can safely ignore this email.
+              </p>
+
+              <!-- Support -->
+              <p style="margin:0;font-size:13px;line-height:1.65;color:#888888;">
+                Need help? Contact us at
+                <a href="mailto:support@agnora-motors.com"
+                   style="color:#FF4D2E;text-decoration:none;font-weight:500;">
+                  support@agnora-motors.com
+                </a>
+              </p>
+
+            </td>
+          </tr>
+
+          <!-- ── Footer ───────────────────────────────────────────── -->
+          <tr>
+            <td style="padding:20px 40px;background-color:#fafafa;
+                       border-top:1px solid #f0f0f0;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#aaaaaa;line-height:1.5;">
+                Agnora Motors &nbsp;&middot;&nbsp; Nairobi, Kenya &nbsp;&nbsp;&copy; 2026
+              </p>
+            </td>
+          </tr>
+
+        </table>
+        <!-- /Card -->
+
+      </td>
+    </tr>
+  </table>
+  <!-- /Outer wrapper -->
+
+</body>
+</html>`;
 }
