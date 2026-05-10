@@ -2,6 +2,7 @@ import NextAuth, { type DefaultSession } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { getUserWithHash, createUser, getUserByEmail, markUserEmailVerified, isDbConfigured } from "@/lib/db";
 import { findLocalUser } from "@/lib/local-users";
@@ -22,11 +23,14 @@ declare module "next-auth" {
 }
 
 function getEnvAdmin() {
-  const email = process.env.ADMIN_EMAIL;
-  const hash  = process.env.ADMIN_PASSWORD_HASH;
-  const name  = process.env.ADMIN_NAME ?? "Admin";
-  if (!email || !hash) return null;
-  return { id: "env-admin", email, name, role: "admin", passwordHash: hash };
+  const email    = process.env.ADMIN_EMAIL;
+  const name     = process.env.ADMIN_NAME ?? "Admin";
+  // ADMIN_PASSWORD  — plain text (preferred, no $ expansion issues)
+  // ADMIN_PASSWORD_HASH — bcrypt hash (fallback, fragile with dotenv-expand)
+  const password = process.env.ADMIN_PASSWORD;
+  const hash     = process.env.ADMIN_PASSWORD_HASH;
+  if (!email || (!password && !hash)) return null;
+  return { id: "env-admin", email, name, role: "admin", password, passwordHash: hash };
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -72,7 +76,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // 1. Env-based admin fallback (no DB required)
         const envAdmin = getEnvAdmin();
         if (envAdmin && email.toLowerCase() === envAdmin.email.toLowerCase()) {
-          const valid = await bcrypt.compare(password, envAdmin.passwordHash);
+          let valid = false;
+          if (envAdmin.password) {
+            // Timing-safe plain comparison — avoids dotenv-expand mangling $ in bcrypt hashes
+            const a = Buffer.from(password);
+            const b = Buffer.from(envAdmin.password);
+            valid = a.length === b.length && timingSafeEqual(a, b);
+          } else if (envAdmin.passwordHash) {
+            valid = await bcrypt.compare(password, envAdmin.passwordHash);
+          }
           console.log("[authorize] env-admin email=%s valid=%s", email, valid);
           if (!valid) return null;
           return { id: envAdmin.id, email: envAdmin.email, name: envAdmin.name, role: envAdmin.role };
