@@ -166,8 +166,8 @@ function EventFeed({ events }: { events: Array<{ id: number; type: string; paylo
             <p className="font-medium text-foreground leading-tight">
               {EVENT_LABELS[ev.type] ?? ev.type}
             </p>
-            {ev.payload.email && (
-              <p className="text-muted truncate">{ev.payload.email as string}</p>
+            {typeof ev.payload.email === "string" && ev.payload.email && (
+              <p className="text-muted truncate">{ev.payload.email}</p>
             )}
           </div>
           <span className="text-muted whitespace-nowrap">

@@ -60,12 +60,9 @@ export async function POST(req: Request) {
     await sendSmsOtp(phone, code);
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[seller/phone POST]", err);
+    console.error("[seller/phone POST] SMS delivery error:", err);
     const detail = err instanceof Error ? err.message : String(err);
-    // Surface the real AT error in development; keep generic in production
-    const message = process.env.NODE_ENV === "development"
-      ? `SMS error: ${detail}`
-      : "Failed to send SMS. Check your number and try again.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Always surface the real AT error — it's actionable (balance, sender ID, etc.)
+    return NextResponse.json({ error: detail }, { status: 500 });
   }
 }

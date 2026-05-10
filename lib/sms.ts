@@ -1,13 +1,7 @@
-const IS_SANDBOX = (process.env.AT_USERNAME ?? "").toLowerCase() === "sandbox";
-
-const AT_ENDPOINT = IS_SANDBOX
-  ? "https://api.sandbox.africastalking.com/version1/messaging"
-  : "https://api.africastalking.com/version1/messaging";
-
-/** Normalise any Kenyan format → 254XXXXXXXXX (digits only, no + prefix) */
+/** Normalise any Kenyan phone format → 254XXXXXXXXX (digits only, no + prefix) */
 function normalizeKenyanPhone(phone: string): string {
   let p = phone.replaceAll(/[\s\-().]/g, ""); // strip formatting chars
-  if (p.startsWith("+")) p = p.slice(1);   // drop leading +
+  if (p.startsWith("+")) p = p.slice(1);      // drop leading +
   if (p.startsWith("0")) p = "254" + p.slice(1); // 07xx → 2547xx
   return p;
 }
@@ -17,13 +11,18 @@ export async function sendSmsOtp(phone: string, code: string): Promise<void> {
   const username = process.env.AT_USERNAME;
 
   if (!apiKey || !username) {
-    // Dev fallback — log OTP so you can still test without AT credentials
     console.warn(`[sms] AT_API_KEY / AT_USERNAME not set — OTP for ${phone}: ${code} (NOT sent)`);
     return;
   }
 
+  // Evaluate sandbox at call time (not module load) so Vercel runtime env is used
+  const isSandbox  = username.toLowerCase() === "sandbox";
+  const atEndpoint = isSandbox
+    ? "https://api.sandbox.africastalking.com/version1/messaging"
+    : "https://api.africastalking.com/version1/messaging";
+
   const to = normalizeKenyanPhone(phone);
-  console.log("[sms] sending OTP to=%s (raw=%s) sandbox=%s endpoint=%s", to, phone, IS_SANDBOX, AT_ENDPOINT);
+  console.log("[sms] sending OTP to=%s (raw=%s) sandbox=%s", to, phone, isSandbox);
 
   const body = new URLSearchParams({
     username,
@@ -32,20 +31,25 @@ export async function sendSmsOtp(phone: string, code: string): Promise<void> {
   });
 
   // Sender ID rules:
-  //  • Sandbox does NOT support custom sender IDs — omit entirely.
-  //  • Production: only set if value is ≤11 alphanumeric chars (no spaces).
-  //    "Agnora Motors" is invalid (13 chars + space) so it is silently skipped.
-  if (!IS_SANDBOX) {
+  //  • Sandbox: omit entirely — AT sandbox rejects custom sender IDs
+  //  • Production: only send if ≤11 alphanumeric chars and no spaces
+  //    (AT rejects "Agnora Motors" — 13 chars with space)
+  if (!isSandbox) {
     const sid = (process.env.AT_SENDER_ID ?? "").trim().replaceAll(/\s+/g, "");
     if (sid && sid.length <= 11 && /^[a-zA-Z0-9]+$/.test(sid)) {
       body.set("from", sid);
+      console.log("[sms] using sender ID: %s", sid);
     } else if (process.env.AT_SENDER_ID) {
-      console.warn("[sms] AT_SENDER_ID=%s is invalid (must be ≤11 alphanumeric chars, no spaces) — omitting",
+      console.warn("[sms] AT_SENDER_ID=%s is invalid (≤11 alphanumeric, no spaces) — AT will use default shortcode",
         process.env.AT_SENDER_ID);
+    } else {
+      console.log("[sms] no AT_SENDER_ID set — AT will use default shortcode");
     }
   }
 
-  const res = await fetch(AT_ENDPOINT, {
+  console.log("[sms] POST %s body=%s", atEndpoint, body.toString().replace(apiKey, "***"));
+
+  const res = await fetch(atEndpoint, {
     method: "POST",
     headers: {
       apiKey,
@@ -55,14 +59,19 @@ export async function sendSmsOtp(phone: string, code: string): Promise<void> {
     body: body.toString(),
   });
 
-  let json: unknown;
-  try {
-    json = await res.json();
-  } catch {
-    throw new Error(`Africa's Talking returned non-JSON (HTTP ${res.status}) — check AT_API_KEY`);
+  const rawText = await res.text();
+  console.log("[sms] AT HTTP status=%d raw response=%s", res.status, rawText);
+
+  if (!res.ok && rawText.trim() === "") {
+    throw new Error(`AT API HTTP ${res.status} — check AT_API_KEY validity`);
   }
 
-  console.log("[sms] AT response:", JSON.stringify(json));
+  let json: unknown;
+  try {
+    json = JSON.parse(rawText);
+  } catch {
+    throw new Error(`AT API returned non-JSON (HTTP ${res.status}): ${rawText.slice(0, 200)}`);
+  }
 
   const data = json as {
     SMSMessageData?: {
@@ -72,13 +81,32 @@ export async function sendSmsOtp(phone: string, code: string): Promise<void> {
 
   const recipient = data.SMSMessageData?.Recipients?.[0];
   if (!recipient) {
-    throw new Error(`AT returned no recipients: ${JSON.stringify(json)}`);
+    throw new Error(`AT returned no recipients. Full response: ${JSON.stringify(json)}`);
   }
 
-  // 101 = Sent, 102 = Queued — both are valid delivery states
-  if (recipient.statusCode !== 101 && recipient.statusCode !== 102) {
-    throw new Error(`SMS delivery failed [${recipient.statusCode}]: ${recipient.status}`);
+  console.log("[sms] recipient=%s statusCode=%d status=%s",
+    recipient.number, recipient.statusCode, recipient.status);
+
+  // AT success status codes:
+  //   100 = Processed  101 = Sent  102 = Queued  — all mean the message was accepted
+  if (![100, 101, 102].includes(recipient.statusCode)) {
+    // Map known AT error codes to actionable messages
+    const errorMap: Record<number, string> = {
+      401: "Risk hold — contact Africa's Talking support",
+      402: "Invalid Sender ID — register it in your AT dashboard",
+      403: "Invalid phone number",
+      404: "Unsupported number type",
+      405: "Insufficient AT wallet balance — top up at account.africastalking.com",
+      406: "Number is not in your AT sandbox whitelist",
+      407: "Could not route message — try a different network",
+      500: "Africa's Talking internal error — retry later",
+      501: "Gateway error — retry later",
+      502: "Rejected by carrier gateway",
+    };
+    const hint = errorMap[recipient.statusCode] ?? recipient.status;
+    throw new Error(`SMS failed [${recipient.statusCode}]: ${hint}`);
   }
 
-  console.log("[sms] OTP delivered to=%s status=%s", recipient.number, recipient.status);
+  console.log("[sms] ✓ OTP delivered to=%s status=%s (code %d)",
+    recipient.number, recipient.status, recipient.statusCode);
 }
