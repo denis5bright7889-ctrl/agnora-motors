@@ -1035,12 +1035,24 @@ export interface PhoneOtp {
 }
 
 export async function upsertPhoneOtp(userId: string, phone: string, code: string): Promise<void> {
-  await query(`DELETE FROM phone_otps WHERE user_id = $1`, [userId]);
+  // Keep old records for rate-limit counting; verifyPhoneOtp always picks the newest.
+  // Purge records older than 1 hour to prevent table bloat.
+  await query(`DELETE FROM phone_otps WHERE user_id = $1 AND created_at < NOW() - INTERVAL '1 hour'`, [userId]);
   await query(
     `INSERT INTO phone_otps (user_id, phone, code, expires_at)
-     VALUES ($1, $2, $3, NOW() + INTERVAL '10 minutes')`,
+     VALUES ($1, $2, $3, NOW() + INTERVAL '5 minutes')`,
     [userId, phone, code],
   );
+}
+
+/** Count OTP send requests for a user in the last hour (for rate limiting). */
+export async function countRecentOtpRequests(userId: string): Promise<number> {
+  const rows = await query<{ count: string }>(
+    `SELECT COUNT(*) AS count FROM phone_otps
+     WHERE user_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+    [userId],
+  );
+  return parseInt(rows[0]?.count ?? "0", 10);
 }
 
 export async function verifyPhoneOtp(
