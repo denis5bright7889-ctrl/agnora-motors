@@ -142,12 +142,13 @@ export async function createDealer(data: {
   businessCertUrl: string;
   phone: string;
   location: string;
+  status?: "pending" | "approved" | "rejected";
 }): Promise<Dealer> {
   const rows = await query<Dealer>(
     `INSERT INTO dealers
        (user_id, business_name, business_reg, kra_pin, director_name,
-        director_id_url, business_cert_url, phone, location)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        director_id_url, business_cert_url, phone, location, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10, 'pending'))
      RETURNING
        id, user_id AS "userId", business_name AS "businessName",
        business_reg AS "businessReg", kra_pin AS "kraPin",
@@ -158,7 +159,7 @@ export async function createDealer(data: {
     [
       data.userId, data.businessName, data.businessReg, data.kraPin,
       data.directorName, data.directorIdUrl, data.businessCertUrl,
-      data.phone, data.location,
+      data.phone, data.location, data.status ?? null,
     ],
   );
   return rows[0];
@@ -268,6 +269,46 @@ export async function createDealerCar(
       data.images, data.features,
       data.financingAvailable  ?? false,
       data.hirePurchaseAvailable ?? false,
+    ],
+  );
+  return rows[0];
+}
+
+// Create a listing with NO dealer/seller account attached. Used by the
+// login-free public posting flow — buyers reach the seller via the
+// seller_name / seller_phone captured on the form.
+export async function createPublicCar(
+  data: Omit<
+    DealerCar,
+    "id" | "dealerId" | "slug" | "createdAt" | "updatedAt" | "views" | "inquiries" | "verified" | "status"
+  > & { sellerName: string; sellerPhone: string },
+): Promise<DealerCar> {
+  const base   = slugify(`${data.year}-${data.make}-${data.model}`);
+  const suffix = Math.random().toString(36).slice(2, 7);
+  const slug   = `${base}-${suffix}`;
+
+  const rows = await query<DealerCar>(
+    `INSERT INTO cars
+       (slug, year, make, model, trim, price, mileage, fuel,
+        transmission, body_type, condition, location, description, images, features,
+        financing_available, hire_purchase_available, seller_name, seller_phone)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+     RETURNING
+       id, dealer_id AS "dealerId", slug, year, make, model, trim,
+       price, mileage, fuel, transmission,
+       body_type AS "bodyType", condition, location, description,
+       images, features, verified, status,
+       financing_available  AS "financingAvailable",
+       hire_purchase_available AS "hirePurchaseAvailable",
+       created_at AS "createdAt", updated_at AS "updatedAt"`,
+    [
+      slug, data.year, data.make, data.model, data.trim ?? null,
+      data.price, data.mileage, data.fuel, data.transmission, data.bodyType,
+      data.condition, data.location, data.description,
+      data.images, data.features,
+      data.financingAvailable  ?? false,
+      data.hirePurchaseAvailable ?? false,
+      data.sellerName, data.sellerPhone,
     ],
   );
   return rows[0];
@@ -398,9 +439,9 @@ export async function getPublicCars(opts: {
             c.financing_available  AS "financingAvailable",
             c.hire_purchase_available AS "hirePurchaseAvailable",
             c.created_at AS "createdAt",
-            d.business_name AS "dealerName",
-            d.location      AS "dealerLocation",
-            d.phone         AS "dealerPhone"
+            COALESCE(d.business_name, c.seller_name) AS "dealerName",
+            COALESCE(d.location, c.location)         AS "dealerLocation",
+            COALESCE(d.phone, c.seller_phone)        AS "dealerPhone"
      FROM cars c
      LEFT JOIN dealers d ON d.id = c.dealer_id
      WHERE ${where}

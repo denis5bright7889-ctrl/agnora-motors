@@ -35,7 +35,7 @@ export function BottomNav() {
   const role     = session?.user?.role;
   const isDealer = role === "dealer";
   const isPrivate = role === "private_seller";
-  const sellHref = (isDealer || isPrivate) ? "/dealer/listings/new" : "/sell";
+  const sellHref = (isDealer || isPrivate) ? "/dealer/listings/new" : "/sell/new";
 
   const items: NavItem[] = BASE_ITEMS.map((i) =>
     i.label === "Sell" ? { ...i, href: sellHref } : i,

@@ -669,9 +669,9 @@ function CarsListingInner({ allCars }: Props) {
                   </svg>
                 </div>
                 <h2 className="font-display text-2xl font-medium mb-2">No cars available yet</h2>
-                <p className="text-muted mb-6 max-w-sm">Be the first to list. Join as a dealer and start uploading cars to reach thousands of buyers across Kenya.</p>
+                <p className="text-muted mb-6 max-w-sm">Be the first to list. No account needed — upload your car and reach thousands of buyers across Kenya.</p>
                 <a
-                  href="/dealer/register"
+                  href="/sell/new"
                   className="inline-flex h-11 items-center gap-2 rounded-full bg-accent text-white px-7 text-sm font-semibold hover:opacity-90 transition-opacity"
                 >
                   List your first car <ChevronRight className="h-4 w-4" />

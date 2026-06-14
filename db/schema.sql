@@ -65,6 +65,9 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS hire_purchase_available BOOLEAN DEFAUL
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS seller_user_id          TEXT REFERENCES users(id) ON DELETE CASCADE;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS is_featured             BOOLEAN DEFAULT FALSE;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS boost_expires_at        TIMESTAMPTZ;
+-- Contact details for login-free ("public") listings that have no dealer/seller account.
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS seller_name             TEXT;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS seller_phone            TEXT;
 
 CREATE TABLE IF NOT EXISTS car_views (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

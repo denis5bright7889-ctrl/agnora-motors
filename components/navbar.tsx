@@ -51,9 +51,9 @@ export function Navbar() {
   const dashHref    = isAdmin ? "/admin" : isDealer ? "/dealer-dashboard" : "/private-dashboard";
   const initial     = session?.user?.name?.[0]?.toUpperCase() ?? "?";
 
-  // Dealers and private sellers go straight to "add listing" when they click Sell.
-  // Everyone else sees the /sell landing page.
-  const sellHref = (isDealer || isPrivate) ? "/dealer/listings/new" : "/sell";
+  // Dealers and private sellers go to their dashboard "add listing".
+  // Everyone else goes straight to the login-free posting form.
+  const sellHref = (isDealer || isPrivate) ? "/dealer/listings/new" : "/sell/new";
   const NAV_LINKS = STATIC_NAV_LINKS.map((l) =>
     l.label === "Sell" ? { ...l, href: sellHref } : l,
   );

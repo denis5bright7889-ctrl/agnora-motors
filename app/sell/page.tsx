@@ -28,10 +28,10 @@ export default function SellPage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
-              href="/dealer/register"
+              href="/sell/new"
               className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-accent px-7 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
             >
-              List as a dealer <ArrowRight className="h-4 w-4" />
+              List your car <ArrowRight className="h-4 w-4" />
             </Link>
             <a
               href="#valuation"
@@ -73,10 +73,10 @@ export default function SellPage() {
             <SellPathCard
               icon={Car}
               title="Private seller"
-              description="List your own car. Buyers contact you directly. Great for individual vehicle sales with full control."
-              features={["Free listing", "Direct buyer contact", "Manage your own schedule", "No dealer fees"]}
+              description="List your own car with no account needed. Buyers contact you directly. Great for individual vehicle sales with full control."
+              features={["Free listing", "No sign-up required", "Direct buyer contact", "No dealer fees"]}
               cta="Create a private listing"
-              href="/seller/verify"
+              href="/sell/new"
               accent={false}
             />
             <SellPathCard
@@ -84,8 +84,8 @@ export default function SellPage() {
               title="Become a dealer"
               description="Sell multiple cars under your business. Access a full dashboard, analytics, and bulk listing tools."
               features={["Unlimited listings", "Business dashboard", "Verified dealer badge", "Priority support"]}
-              cta="Apply for dealer account"
-              href="/dealer/register"
+              cta="List as a dealer"
+              href="/sell/new"
               accent={true}
             />
           </div>
@@ -204,16 +204,16 @@ export default function SellPage() {
           </p>
           <div className="flex flex-col sm:flex-row gap-3 justify-center">
             <Link
-              href="/dealer/register"
+              href="/sell/new"
               className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-accent px-8 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
             >
-              Start selling <ArrowRight className="h-4 w-4" />
+              List your car <ArrowRight className="h-4 w-4" />
             </Link>
             <Link
-              href="/register"
+              href="/cars"
               className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-border px-8 text-sm font-medium hover:bg-surface-2 transition-colors"
             >
-              Create free account
+              Browse cars
             </Link>
           </div>
         </div>
