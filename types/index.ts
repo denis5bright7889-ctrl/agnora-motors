@@ -6,6 +6,9 @@ export type DealerStatus = "pending" | "approved" | "rejected";
 export type CarStatus = "active" | "sold" | "draft";
 export type UserRole = "admin" | "dealer" | "private_seller" | "buyer";
 export type PlanId = "free" | "pro" | "premium";
+export type Drivetrain = "fwd" | "rwd" | "awd" | "4wd";
+export type SellerType = "dealer" | "private" | "login_free";
+export type PriceTier  = "great" | "fair" | "above";
 
 export interface Car {
   id: string;
@@ -29,6 +32,22 @@ export interface Car {
   boostExpiresAt?: string | null;
   financingAvailable?: boolean;
   hirePurchaseAvailable?: boolean;
+  // PR4: advanced filter fields. All optional during the data-migration window.
+  drivetrain?: Drivetrain;
+  engineSizeL?: number;
+  previousOwners?: number;
+  exteriorColor?: string;
+  interiorColor?: string;
+  sellerType?: SellerType;
+  // PR6: trust + market price.
+  vin?: string;
+  vinVerified?: boolean;
+  serviceHistoryAvailable?: boolean;
+  ownershipVerified?: boolean;
+  inspectionAvailable?: boolean;
+  marketAvg?: number;            // KSh average of comparable listed cars
+  marketSampleCount?: number;    // how many comparables fed the average
+  priceTier?: PriceTier;         // "great" | "fair" | "above"
   dealer: {
     name: string;
     rating: number;
@@ -61,6 +80,23 @@ export interface Brand {
   slug: string;
   count: number;
   topModel?: string;
+}
+
+export interface Make {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+export interface Model {
+  id: string;
+  makeId: string;
+  slug: string;
+  name: string;
+}
+
+export interface MakeWithModels extends Make {
+  models: Model[];
 }
 
 export interface Dealer {
@@ -105,6 +141,19 @@ export interface DealerCar {
   boostExpiresAt?: string | null;
   financingAvailable?: boolean;
   hirePurchaseAvailable?: boolean;
+  // PR4: advanced fields (mirrors Car).
+  drivetrain?: Drivetrain | null;
+  engineSizeL?: number | null;
+  previousOwners?: number | null;
+  exteriorColor?: string | null;
+  interiorColor?: string | null;
+  sellerType?: SellerType | null;
+  // PR6: trust flags.
+  vin?: string | null;
+  vinVerified?: boolean | null;
+  serviceHistoryAvailable?: boolean | null;
+  ownershipVerified?: boolean | null;
+  inspectionAvailable?: boolean | null;
   status: CarStatus;
   createdAt: string;
   updatedAt: string;

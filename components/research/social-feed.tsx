@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { TrendingUp, Clock, Hash, Loader2 } from "lucide-react";
+import { TrendingUp, Clock, Hash, Loader2, MessageSquare } from "lucide-react";
 import { PostCard } from "./post-card";
 import { CreatePost } from "./create-post";
 import { cn } from "@/lib/utils";
@@ -203,9 +203,11 @@ export function SocialFeed({ userId, userName, userImage }: Props) {
         </div>
       ) : posts.length === 0 ? (
         <div className="py-20 text-center">
-          <p className="text-4xl mb-3">🚗</p>
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-surface-2">
+            <MessageSquare className="h-6 w-6 text-muted" aria-hidden />
+          </div>
           <p className="font-semibold mb-1">No posts yet</p>
-          <p className="text-sm text-muted">Be the first to share something about cars!</p>
+          <p className="text-sm text-muted">Be the first to share something about cars.</p>
         </div>
       ) : (
         <div className="space-y-4">

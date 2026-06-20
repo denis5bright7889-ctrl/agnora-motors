@@ -8,6 +8,7 @@ import {
   Eye,
   ExternalLink,
   BookOpen,
+  MapPin,
 } from "lucide-react";
 import type { Metadata } from "next";
 import type { NewsArticle } from "@/types";
@@ -28,13 +29,6 @@ function readTimeMinutes(text: string | null): number {
   const words = text.trim().split(/\s+/).length;
   return Math.max(1, Math.round(words / 200));
 }
-
-const COUNTRY_FLAGS: Record<string, string> = {
-  ke: "🇰🇪",
-  ea: "🌍",
-  af: "🌍",
-  global: "🌐",
-};
 
 const COUNTRY_LABELS: Record<string, string> = {
   ke: "Kenya",
@@ -110,12 +104,11 @@ export async function generateMetadata({
     return { title: "Article not found — Agnora Motors" };
   }
 
-  const flag = COUNTRY_FLAGS[article.country] ?? "";
   return {
     title: `${article.title} — Agnora Motors`,
     description: article.summary ?? undefined,
     openGraph: {
-      title: `${flag} ${article.title}`,
+      title: article.title,
       description: article.summary ?? undefined,
       type: "article",
       publishedTime: article.publishedAt,
@@ -149,7 +142,6 @@ export default async function NewsArticlePage({
   const related = await fetchRelated(article.category, slug, origin);
   const bodyText = article.content ?? article.summary ?? "";
   const readTime = readTimeMinutes(bodyText);
-  const flag = COUNTRY_FLAGS[article.country] ?? "";
   const countryLabel = COUNTRY_LABELS[article.country] ?? article.country;
   const catCls = CATEGORY_COLORS[article.category.toLowerCase()] ?? "bg-surface-2 text-muted";
   const isExternal = article.url && article.url !== "#";
@@ -177,14 +169,15 @@ export default async function NewsArticlePage({
   };
 
   return (
-    <>
-      {/* JSON-LD */}
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+    <div className="min-h-screen bg-background">
+      {/* JSON-LD — rendered via a non-script element so React doesn't warn about
+          encountering a <script> tag during client render. Search crawlers read
+          the application/ld+json payload from the SSR'd HTML all the same. */}
+      <div
+        dangerouslySetInnerHTML={{
+          __html: `<script type="application/ld+json">${JSON.stringify(jsonLd).replace(/</g, "\\u003c")}</script>`,
+        }}
       />
-
-      <div className="min-h-screen bg-background">
         {/* Breadcrumb */}
         <div className="border-b border-border bg-surface/60 backdrop-blur-sm">
           <div className="container max-w-container py-3 px-4 flex items-center gap-2 text-sm text-muted overflow-hidden">
@@ -234,7 +227,8 @@ export default async function NewsArticlePage({
                   {article.category.replace(/-/g, " ")}
                 </span>
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-3 py-1 text-xs font-medium text-muted">
-                  {flag} {countryLabel}
+                  <MapPin className="h-3 w-3" aria-hidden />
+                  {countryLabel}
                 </span>
               </div>
 
@@ -404,8 +398,7 @@ export default async function NewsArticlePage({
             </aside>
           </div>
         </div>
-      </div>
-    </>
+    </div>
   );
 }
 

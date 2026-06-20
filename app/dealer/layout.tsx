@@ -65,6 +65,17 @@ export default async function DealerLayout({ children }: { children: React.React
 
   const plan = getPlan(planId);
 
+  // Resolve the active nav item: the longest href the current path matches.
+  // (So /dealer/listings/new highlights "Add Car", not "My Cars".)
+  const navHrefs = [
+    ...NAV.map((n) => n.href),
+    ...(plan.aiChat ? ["/dealer/ai-chat"] : []),
+  ];
+  const activeHref =
+    navHrefs
+      .filter((href) => pathname === href || pathname.startsWith(href + "/"))
+      .sort((a, b) => b.length - a.length)[0] ?? "";
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)]">
 
@@ -114,22 +125,37 @@ export default async function DealerLayout({ children }: { children: React.React
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {NAV.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted hover:bg-surface-2 hover:text-foreground transition-colors group"
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {label}
-              <ChevronRight className="ml-auto h-3 w-3 opacity-0 group-hover:opacity-50 transition-opacity" />
-            </Link>
-          ))}
+          {NAV.map(({ href, label, icon: Icon }) => {
+            const active = href === activeHref;
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors group",
+                  active
+                    ? "bg-accent-soft text-accent"
+                    : "text-muted hover:bg-surface-2 hover:text-foreground",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {label}
+                <ChevronRight className="ml-auto h-3 w-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+              </Link>
+            );
+          })}
 
           {plan.aiChat && (
             <Link
               href="/dealer/ai-chat"
-              className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted hover:bg-surface-2 hover:text-foreground transition-colors group"
+              aria-current={activeHref === "/dealer/ai-chat" ? "page" : undefined}
+              className={cn(
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors group",
+                activeHref === "/dealer/ai-chat"
+                  ? "bg-accent-soft text-accent"
+                  : "text-muted hover:bg-surface-2 hover:text-foreground",
+              )}
             >
               <Bot className="h-4 w-4 shrink-0 text-accent" />
               AI Assistant
@@ -186,16 +212,25 @@ export default async function DealerLayout({ children }: { children: React.React
         {/* Mobile horizontal nav */}
         <nav className="md:hidden flex overflow-x-auto scroll-rail gap-1.5 px-3 py-2.5 border-b border-border bg-surface/80 backdrop-blur">
           {[...NAV, ...(plan.aiChat ? [{ href: "/dealer/ai-chat", label: "AI", icon: Bot }] : [])].map(
-            ({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="flex items-center gap-1.5 shrink-0 h-8 rounded-full border border-border bg-surface-2 px-3 text-xs font-medium text-muted hover:bg-surface hover:text-foreground whitespace-nowrap transition-colors"
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                {label}
-              </Link>
-            ),
+            ({ href, label, icon: Icon }) => {
+              const active = href === activeHref;
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-1.5 shrink-0 h-8 rounded-full border px-3 text-xs font-medium whitespace-nowrap transition-colors",
+                    active
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-border bg-surface-2 text-muted hover:bg-surface hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  {label}
+                </Link>
+              );
+            },
           )}
           <Link href="/" className="flex items-center gap-1.5 shrink-0 h-8 rounded-full border border-border px-3 text-xs font-medium text-muted whitespace-nowrap transition-colors hover:text-foreground">
             ← Site

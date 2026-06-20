@@ -1,27 +1,76 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createPublicCar, getPublicCars, isDbConfigured } from "@/lib/db";
+import { createPublicCar, getCarsByIds, getPublicCars, isDbConfigured, ListingQualityError } from "@/lib/db";
 import { publishEvent } from "@/lib/realtime";
+import { cars as STATIC_CARS } from "@/data/cars";
+import type { Car } from "@/types";
 
 export const runtime = "nodejs";
 
+const MAX_IDS_PER_REQUEST = 100;
+
 export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+
+  // ── Batch ID lookup (PR3d) ────────────────────────────────────────────────
+  // Used by wishlist + recently-viewed to resolve localStorage IDs to full
+  // Car records. Works against DB + static set so mixed IDs (legacy demo IDs
+  // alongside real UUIDs) all resolve.
+  const idsParam = searchParams.get("ids");
+  if (idsParam !== null) {
+    const ids = idsParam
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, MAX_IDS_PER_REQUEST);
+
+    if (ids.length === 0) {
+      return NextResponse.json({ cars: [] });
+    }
+
+    const byId = new Map<string, Car>();
+
+    if (isDbConfigured()) {
+      try {
+        const dbCars = await getCarsByIds(ids);
+        for (const c of dbCars) byId.set(c.id, c);
+      } catch (err) {
+        console.error("[GET /api/cars?ids]", err instanceof Error ? err.message : err);
+        // fall through to static
+      }
+    }
+
+    // Static fallback for any IDs not resolved by the DB (covers demo IDs
+    // and graceful degradation when the DB is empty).
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length > 0) {
+      const missingSet = new Set(missing);
+      for (const c of STATIC_CARS) if (missingSet.has(c.id)) byId.set(c.id, c);
+    }
+
+    // Preserve the caller's input order — wishlist & recents care about it.
+    const cars = ids
+      .map((id) => byId.get(id))
+      .filter((c): c is Car => c != null);
+
+    return NextResponse.json({ cars });
+  }
+
+  // ── Existing search filter path ───────────────────────────────────────────
   if (!isDbConfigured()) {
     return NextResponse.json({ cars: [] });
   }
 
-  const { searchParams } = new URL(req.url);
-
-  const search = searchParams.get("search") ?? undefined;
-  const condition = searchParams.get("condition") ?? undefined;
+  const search       = searchParams.get("search")       ?? undefined;
+  const condition    = searchParams.get("condition")    ?? undefined;
   const transmission = searchParams.get("transmission") ?? undefined;
-  const makes = searchParams.getAll("make").filter(Boolean);
-  const bodies = searchParams.getAll("body").filter(Boolean);
-  const fuels = searchParams.getAll("fuel").filter(Boolean);
-  const locations = searchParams.getAll("location").filter(Boolean);
-  const minPrice = searchParams.get("minPrice") ? Number(searchParams.get("minPrice")) : undefined;
-  const maxPrice = searchParams.get("maxPrice") ? Number(searchParams.get("maxPrice")) : undefined;
-  const financing = searchParams.get("financing") === "true" ? true : undefined;
+  const makes        = searchParams.getAll("make").filter(Boolean);
+  const bodies       = searchParams.getAll("body").filter(Boolean);
+  const fuels        = searchParams.getAll("fuel").filter(Boolean);
+  const locations    = searchParams.getAll("location").filter(Boolean);
+  const minPrice     = searchParams.get("minPrice")    ? Number(searchParams.get("minPrice"))    : undefined;
+  const maxPrice     = searchParams.get("maxPrice")    ? Number(searchParams.get("maxPrice"))    : undefined;
+  const financing    = searchParams.get("financing")    === "true" ? true : undefined;
   const hirePurchase = searchParams.get("hirePurchase") === "true" ? true : undefined;
 
   try {
@@ -56,6 +105,18 @@ const createSchema = z.object({
   features: z.array(z.string()).default([]),
   financingAvailable: z.boolean().default(false),
   hirePurchaseAvailable: z.boolean().default(false),
+  // PR4b
+  drivetrain:     z.enum(["fwd","rwd","awd","4wd"]).optional(),
+  engineSizeL:    z.coerce.number().min(0.5).max(8.0).optional(),
+  previousOwners: z.coerce.number().int().min(0).max(20).optional(),
+  exteriorColor:  z.string().max(40).optional(),
+  interiorColor:  z.string().max(40).optional(),
+  // PR6b
+  vin:                     z.string().min(11).max(20).optional(),
+  vinVerified:             z.boolean().optional(),
+  serviceHistoryAvailable: z.boolean().optional(),
+  ownershipVerified:       z.boolean().optional(),
+  inspectionAvailable:     z.boolean().optional(),
 });
 
 export async function POST(req: Request) {
@@ -80,6 +141,9 @@ export async function POST(req: Request) {
     }).catch(() => {});
     return NextResponse.json({ car }, { status: 201 });
   } catch (err) {
+    if (err instanceof ListingQualityError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     console.error("[POST /api/cars]", err);
     return NextResponse.json({ error: "Failed to create listing" }, { status: 500 });
   }

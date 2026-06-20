@@ -5,6 +5,7 @@ import {
   createDealerCar,
   getDealerCars,
   deleteDealerCar,
+  ListingQualityError,
 } from "@/lib/db";
 import { publishEvent } from "@/lib/realtime";
 
@@ -45,6 +46,9 @@ export async function POST(req: Request) {
     }).catch(() => {});
     return NextResponse.json({ car }, { status: 201 });
   } catch (err) {
+    if (err instanceof ListingQualityError) {
+      return NextResponse.json({ error: err.message }, { status: 400 });
+    }
     console.error(err);
     return NextResponse.json({ error: "Failed to create listing" }, { status: 500 });
   }

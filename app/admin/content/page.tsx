@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ExternalLink,
+  MapPin,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { NewsArticle, ResearchArticle } from "@/types";
@@ -57,13 +58,14 @@ function NewsStatusBadge({ status }: { status: string }) {
 
 function CountryBadge({ country }: { country: string }) {
   const map: Record<string, string> = {
-    ke: "🇰🇪 Kenya",
-    ea: "🌍 East Africa",
-    af: "🌍 Africa",
-    global: "🌐 Global",
+    ke: "Kenya",
+    ea: "East Africa",
+    af: "Africa",
+    global: "Global",
   };
   return (
-    <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-muted whitespace-nowrap">
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] font-medium text-muted whitespace-nowrap">
+      <MapPin className="h-2.5 w-2.5" aria-hidden />
       {map[country] ?? country}
     </span>
   );

@@ -169,7 +169,12 @@ export default function SellPage() {
                 desc: "No listing fees, no commission. You keep 100% of your sale price.",
               },
               {
-                stat: "4.8 ★",
+                stat: (
+                  <span className="inline-flex items-baseline gap-1.5">
+                    4.8
+                    <Star className="h-5 w-5 self-center fill-current" aria-hidden />
+                  </span>
+                ),
                 label: "Seller satisfaction",
                 desc: "Average rating from sellers who have completed a sale on Agnora.",
               },

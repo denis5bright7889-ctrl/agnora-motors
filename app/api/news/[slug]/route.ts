@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getNewsArticleBySlug, incrementNewsViewCount, isDbConfigured } from "@/lib/db";
+import { getStaticNewsBySlug } from "@/lib/news/static-news";
 
 export const runtime = "nodejs";
 
@@ -9,17 +10,20 @@ export async function GET(
 ) {
   const { slug } = await params;
 
-  if (!isDbConfigured()) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  // Prefer the DB; fall back to the static article set so that cards rendered
+  // from the static list (/api/news) always resolve instead of 404-ing.
+  if (isDbConfigured()) {
+    const article = await getNewsArticleBySlug(slug).catch(() => null);
+    if (article) {
+      incrementNewsViewCount(article.id).catch(() => {}); // fire-and-forget
+      return NextResponse.json({ article });
+    }
   }
 
-  const article = await getNewsArticleBySlug(slug).catch(() => null);
-  if (!article) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  const staticArticle = getStaticNewsBySlug(slug);
+  if (staticArticle) {
+    return NextResponse.json({ article: staticArticle });
   }
 
-  // Fire-and-forget view increment
-  incrementNewsViewCount(article.id).catch(() => {});
-
-  return NextResponse.json({ article });
+  return NextResponse.json({ error: "Not found" }, { status: 404 });
 }

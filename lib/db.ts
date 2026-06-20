@@ -1,5 +1,9 @@
 import { Pool } from "@neondatabase/serverless";
-import type { Car, Dealer, DealerCar, User, NewsArticle, ResearchArticle } from "@/types";
+import type { Car, CarStatus, Dealer, DealerCar, User, NewsArticle, ResearchArticle, Make, Model } from "@/types";
+import type { SearchFilters, SearchResponse, SearchFacets, FacetBucket } from "@/lib/search";
+import { expandAliases } from "@/lib/search-aliases";
+import { getCentroid } from "@/lib/locations";
+import { QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, MAX_VIN_LEN } from "@/lib/quality-policy";
 
 // Use Pool (pg-compatible) so .query(text, params) works correctly.
 // The neon() tagged-template function does NOT expose a .query() method —
@@ -26,6 +30,31 @@ export async function query<T = Record<string, unknown>>(
   const pool = getPool();
   const result = await pool.query<Record<string, unknown>>(text, params);
   return result.rows as T[];
+}
+
+// Single source of truth for the "is this listing publicly visible?" question.
+// Every public-facing query (search, detail, facets) MUST use this helper so
+// /cars and /cars/[slug] can never disagree about a listing's visibility.
+//
+// Returns parameter-free SQL — every value is a server-controlled constant
+// from lib/quality-policy.ts, so inlining is safe (no SQL injection surface)
+// and avoids the $N parameter-index juggling that consolidating across many
+// callers would otherwise require.
+//
+// Paths that must NOT call this (per the visibility matrix in the spec):
+//   - getCarsByIds() — wishlist / recently-viewed must resolve hidden listings
+//   - dealer dashboard queries (admin/dealer scope)
+//   - admin dashboard queries
+export function buildPublicListingVisibilityWhere(alias = "c"): string {
+  return `${alias}.status = 'active'
+    AND (
+      ${alias}.created_at < DATE '${QUALITY_POLICY_CUTOFF}'
+      OR (
+        COALESCE(array_length(${alias}.images, 1), 0) >= ${MIN_PUBLISH_PHOTOS}
+        AND ${alias}.vin IS NOT NULL
+        AND LENGTH(${alias}.vin) >= ${MIN_VIN_LEN}
+      )
+    )`;
 }
 
 export function isDbConfigured(): boolean {
@@ -248,12 +277,21 @@ export async function createDealerCar(
   const suffix = Math.random().toString(36).slice(2, 7);
   const slug   = `${base}-${suffix}`;
 
+  // PR7: publish-quality guard. Active listings require >= MIN photos AND a VIN.
+  // Drafts can be saved with anything so dealers can stage incomplete records.
+  const status: CarStatus = (data.status ?? "active") as CarStatus;
+  if (status === "active") enforcePublishQuality(data.images, data.vin);
+
+  const centroid = getCentroid(data.location);
   const rows = await query<DealerCar>(
     `INSERT INTO cars
        (dealer_id, slug, year, make, model, trim, price, mileage, fuel,
         transmission, body_type, condition, location, description, images, features,
-        financing_available, hire_purchase_available)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+        financing_available, hire_purchase_available,
+        drivetrain, engine_size_l, previous_owners, exterior_color, interior_color, seller_type,
+        latitude, longitude, status,
+        vin, vin_verified, service_history_available, ownership_verified, inspection_available)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -261,6 +299,12 @@ export async function createDealerCar(
        images, features, verified, status,
        financing_available  AS "financingAvailable",
        hire_purchase_available AS "hirePurchaseAvailable",
+       drivetrain,
+       engine_size_l    AS "engineSizeL",
+       previous_owners  AS "previousOwners",
+       exterior_color   AS "exteriorColor",
+       interior_color   AS "interiorColor",
+       seller_type      AS "sellerType",
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       dealerId, slug, data.year, data.make, data.model, data.trim ?? null,
@@ -269,9 +313,44 @@ export async function createDealerCar(
       data.images, data.features,
       data.financingAvailable  ?? false,
       data.hirePurchaseAvailable ?? false,
+      data.drivetrain     ?? null,
+      data.engineSizeL    ?? null,
+      data.previousOwners ?? null,
+      data.exteriorColor  ?? null,
+      data.interiorColor  ?? null,
+      "dealer",
+      centroid?.lat ?? null,
+      centroid?.lng ?? null,
+      status,
+      data.vin                     ?? null,
+      data.vinVerified             ?? false,
+      data.serviceHistoryAvailable ?? false,
+      data.ownershipVerified       ?? false,
+      data.inspectionAvailable     ?? false,
     ],
   );
   return rows[0];
+}
+
+// PR7: shared publish-quality guard for new listings. Drafts skip this.
+// Thresholds live in lib/quality-policy.ts so the same numbers govern insert,
+// update, search-time filtering, the audit query, and admin metrics.
+function enforcePublishQuality(images: string[] | undefined, vin: string | null | undefined): void {
+  const photoCount = images?.length ?? 0;
+  if (photoCount < MIN_PUBLISH_PHOTOS) {
+    throw new ListingQualityError(`Published listings require at least ${MIN_PUBLISH_PHOTOS} photos (${photoCount} supplied). Save as draft to finish later.`);
+  }
+  const vinLen = (vin ?? "").trim().length;
+  if (vinLen < MIN_VIN_LEN || vinLen > MAX_VIN_LEN) {
+    throw new ListingQualityError(`Published listings require a VIN between ${MIN_VIN_LEN} and ${MAX_VIN_LEN} characters (${vinLen} supplied). Save as draft to finish later.`);
+  }
+}
+
+export class ListingQualityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ListingQualityError";
+  }
 }
 
 // Create a listing with NO dealer/seller account attached. Used by the
@@ -287,12 +366,19 @@ export async function createPublicCar(
   const suffix = Math.random().toString(36).slice(2, 7);
   const slug   = `${base}-${suffix}`;
 
+  // PR7: same publish-quality bar for login-free listings.
+  enforcePublishQuality(data.images, data.vin);
+
+  const centroid = getCentroid(data.location);
   const rows = await query<DealerCar>(
     `INSERT INTO cars
        (slug, year, make, model, trim, price, mileage, fuel,
         transmission, body_type, condition, location, description, images, features,
-        financing_available, hire_purchase_available, seller_name, seller_phone)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        financing_available, hire_purchase_available, seller_name, seller_phone,
+        drivetrain, engine_size_l, previous_owners, exterior_color, interior_color, seller_type,
+        latitude, longitude,
+        vin, vin_verified, service_history_available, ownership_verified, inspection_available)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -300,6 +386,12 @@ export async function createPublicCar(
        images, features, verified, status,
        financing_available  AS "financingAvailable",
        hire_purchase_available AS "hirePurchaseAvailable",
+       drivetrain,
+       engine_size_l    AS "engineSizeL",
+       previous_owners  AS "previousOwners",
+       exterior_color   AS "exteriorColor",
+       interior_color   AS "interiorColor",
+       seller_type      AS "sellerType",
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       slug, data.year, data.make, data.model, data.trim ?? null,
@@ -309,6 +401,19 @@ export async function createPublicCar(
       data.financingAvailable  ?? false,
       data.hirePurchaseAvailable ?? false,
       data.sellerName, data.sellerPhone,
+      data.drivetrain     ?? null,
+      data.engineSizeL    ?? null,
+      data.previousOwners ?? null,
+      data.exteriorColor  ?? null,
+      data.interiorColor  ?? null,
+      "login_free",
+      centroid?.lat ?? null,
+      centroid?.lng ?? null,
+      data.vin                     ?? null,
+      data.vinVerified             ?? false,
+      data.serviceHistoryAvailable ?? false,
+      data.ownershipVerified       ?? false,
+      data.inspectionAvailable     ?? false,
     ],
   );
   return rows[0];
@@ -366,7 +471,8 @@ export async function getPublicCars(opts: {
   financing?: boolean;
   hirePurchase?: boolean;
 } = {}): Promise<Car[]> {
-  const conditions: string[] = ["c.status = 'active'"];
+  // Public visibility — single source of truth (status + grandfather + photo/VIN).
+  const conditions: string[] = [buildPublicListingVisibilityWhere("c")];
   const params: unknown[]   = [];
   let idx = 1;
 
@@ -481,6 +587,27 @@ export async function updateDealerCar(
   dealerId: string,
   data: Partial<DealerCar>,
 ): Promise<void> {
+  // PR9: close the update-quality loophole. Before generating the UPDATE, look
+  // at the post-merge images + vin. If the resulting status is "active", the
+  // car must still pass enforcePublishQuality(). Drafts are intentionally
+  // exempt — dealers can stage incomplete records as drafts.
+  const wantsActive = data.status === "active" || data.status === undefined;
+  if (wantsActive) {
+    const rows = await query<{ images: string[]; vin: string | null; status: CarStatus }>(
+      `SELECT images, vin, status FROM cars WHERE id = $1 AND dealer_id = $2 LIMIT 1`,
+      [id, dealerId],
+    );
+    const current = rows[0];
+    if (current) {
+      const resultingStatus = (data.status ?? current.status) as CarStatus;
+      if (resultingStatus === "active") {
+        const finalImages = data.images ?? current.images ?? [];
+        const finalVin    = data.vin    ?? current.vin    ?? null;
+        enforcePublishQuality(finalImages, finalVin);
+      }
+    }
+  }
+
   const sets: string[]    = [];
   const vals: unknown[]   = [];
   let i = 1;
@@ -494,6 +621,18 @@ export async function updateDealerCar(
     features: "features", status: "status",
     financingAvailable:    "financing_available",
     hirePurchaseAvailable: "hire_purchase_available",
+    // PR4b/PR6b — make these editable, otherwise dealers can't backfill a VIN
+    // or add trust flags after the listing has gone live.
+    drivetrain:              "drivetrain",
+    engineSizeL:             "engine_size_l",
+    previousOwners:          "previous_owners",
+    exteriorColor:           "exterior_color",
+    interiorColor:           "interior_color",
+    vin:                     "vin",
+    vinVerified:             "vin_verified",
+    serviceHistoryAvailable: "service_history_available",
+    ownershipVerified:       "ownership_verified",
+    inspectionAvailable:     "inspection_available",
   };
 
   for (const [key, col] of Object.entries(fieldMap)) {
@@ -511,6 +650,102 @@ export async function updateDealerCar(
     `UPDATE cars SET ${sets.join(", ")} WHERE id = $${i} AND dealer_id = $${i + 1}`,
     vals,
   );
+}
+
+// PR9: nightly-audit query. Returns active listings that violate the quality
+// bar — used by the admin "Non-compliant listings" panel and by a future
+// scheduled job. Ordered most-recently-updated first per spec.
+export interface NonCompliantListing {
+  id:                string;
+  slug:              string;
+  year:              number;
+  make:              string;
+  model:             string;
+  photoCount:        number;
+  vin:               string | null;
+  vinLength:         number;
+  missingPhotos:     boolean;
+  missingVin:        boolean;
+  dealerName:        string | null;
+  updatedAt:         string;
+}
+
+export async function getNonCompliantListings(limit = 50): Promise<NonCompliantListing[]> {
+  const rows = await query<{
+    id: string; slug: string; year: number; make: string; model: string;
+    photoCount: number; vin: string | null; vinLength: number;
+    dealerName: string | null; updatedAt: string;
+  }>(
+    `SELECT c.id, c.slug, c.year, c.make, c.model,
+            COALESCE(array_length(c.images, 1), 0)::INT AS "photoCount",
+            c.vin,
+            COALESCE(LENGTH(c.vin), 0)::INT             AS "vinLength",
+            COALESCE(d.business_name, c.seller_name)    AS "dealerName",
+            c.updated_at                                AS "updatedAt"
+     FROM cars c
+     LEFT JOIN dealers d ON d.id = c.dealer_id
+     WHERE c.status = 'active'
+       AND (
+            COALESCE(array_length(c.images, 1), 0) < $1
+         OR c.vin IS NULL
+         OR LENGTH(c.vin) < $2
+       )
+     ORDER BY c.updated_at DESC
+     LIMIT $3`,
+    [MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, limit],
+  );
+
+  return rows.map((r) => ({
+    id:            r.id,
+    slug:          r.slug,
+    year:          r.year,
+    make:          r.make,
+    model:         r.model,
+    photoCount:    r.photoCount,
+    vin:           r.vin,
+    vinLength:     r.vinLength,
+    missingPhotos: r.photoCount < MIN_PUBLISH_PHOTOS,
+    missingVin:    !r.vin || r.vinLength < MIN_VIN_LEN,
+    dealerName:    r.dealerName,
+    updatedAt:     r.updatedAt,
+  }));
+}
+
+// PR-policy: Option A compliance metrics. Single round-trip via FILTER aggregates.
+// grandfathered = active listings created before the cutoff (always visible).
+// compliant     = active listings created on/after cutoff and meeting the bar.
+// hidden        = active listings created on/after cutoff and failing the bar
+//                 (these are the ones the public search clause is hiding).
+export interface ComplianceStats {
+  grandfathered: number;
+  compliant:     number;
+  hidden:        number;
+}
+
+export async function getListingComplianceStats(): Promise<ComplianceStats> {
+  const rows = await query<ComplianceStats>(
+    `SELECT
+       COUNT(*) FILTER (WHERE c.created_at < $1::date)::INT
+         AS grandfathered,
+       COUNT(*) FILTER (
+         WHERE c.created_at >= $1::date
+           AND COALESCE(array_length(c.images, 1), 0) >= $2
+           AND c.vin IS NOT NULL
+           AND LENGTH(c.vin) >= $3
+       )::INT AS compliant,
+       COUNT(*) FILTER (
+         WHERE c.created_at >= $1::date
+           AND (
+                COALESCE(array_length(c.images, 1), 0) < $2
+             OR c.vin IS NULL
+             OR LENGTH(c.vin) < $3
+           )
+       )::INT AS hidden
+     FROM cars c
+     WHERE c.status = 'active'`,
+    [QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN],
+  );
+  return rows[0] ?? { grandfathered: 0, compliant: 0, hidden: 0 };
 }
 
 export async function deleteDealerCar(id: string, dealerId: string): Promise<void> {
@@ -1499,6 +1734,76 @@ export interface DealerActivity {
   revenue: number;
 }
 
+// ── Analytics events (PR8) ───────────────────────────────────────────────────
+
+export interface AnalyticsEventRow {
+  id:          string;
+  name:        string;
+  props:       Record<string, unknown>;
+  path:        string | null;
+  sessionHash: string | null;
+  userId:      string | null;
+  createdAt:   string;
+}
+
+export async function insertAnalyticsEvent(data: {
+  name:        string;
+  props:       Record<string, unknown>;
+  path?:       string | null;
+  ipHash?:     string | null;
+  sessionHash?: string | null;
+  userId?:     string | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO analytics_events (name, props, path, ip_hash, session_hash, user_id)
+     VALUES ($1, $2::jsonb, $3, $4, $5, $6)`,
+    [
+      data.name,
+      JSON.stringify(data.props ?? {}),
+      data.path        ?? null,
+      data.ipHash      ?? null,
+      data.sessionHash ?? null,
+      data.userId      ?? null,
+    ],
+  );
+}
+
+export interface EventTotal { name: string; total: number; sessions: number }
+
+export async function getAnalyticsEventTotals(sinceDays = 7, limit = 12): Promise<EventTotal[]> {
+  const rows = await query<EventTotal>(
+    `SELECT name,
+            COUNT(*)::INT                                AS total,
+            COUNT(DISTINCT session_hash)::INT             AS sessions
+     FROM analytics_events
+     WHERE created_at >= NOW() - ($1::int || ' days')::interval
+     GROUP BY name
+     ORDER BY total DESC
+     LIMIT $2`,
+    [sinceDays, limit],
+  );
+  return rows;
+}
+
+export interface TopSearchTerm { q: string; count: number }
+
+export async function getTopSearchTerms(sinceDays = 7, limit = 10): Promise<TopSearchTerm[]> {
+  // q is stored on search_submitted events as props->>'q'.
+  const rows = await query<TopSearchTerm>(
+    `SELECT (props->>'q')::text  AS q,
+            COUNT(*)::INT          AS count
+     FROM analytics_events
+     WHERE name = 'search_submitted'
+       AND created_at >= NOW() - ($1::int || ' days')::interval
+       AND COALESCE(props->>'q','') <> ''
+     GROUP BY q
+     ORDER BY count DESC
+     LIMIT $2`,
+    [sinceDays, limit],
+  );
+  return rows;
+}
+
 export async function getTopDealersByActivity(limit = 10): Promise<DealerActivity[]> {
   const rows = await query<Record<string, unknown>>(
     `SELECT d.id                                        AS "dealerId",
@@ -1526,4 +1831,663 @@ export async function getTopDealersByActivity(limit = 10): Promise<DealerActivit
     soldListings:  r.soldListings as number,
     revenue:       Number(r.revenue),
   }));
+}
+
+// ── Makes & Models (vehicle taxonomy) ───────────────────────────────────────
+
+export async function listMakes(): Promise<Make[]> {
+  return query<Make>(
+    `SELECT id, slug, name FROM makes ORDER BY name ASC`,
+  );
+}
+
+export async function getMakeBySlug(slug: string): Promise<Make | null> {
+  const rows = await query<Make>(
+    `SELECT id, slug, name FROM makes WHERE slug = $1 LIMIT 1`,
+    [slug],
+  );
+  return rows[0] ?? null;
+}
+
+export async function listModelsByMakeSlug(slug: string): Promise<Model[]> {
+  return query<Model>(
+    `SELECT mo.id, mo.make_id AS "makeId", mo.slug, mo.name
+     FROM models mo
+     JOIN makes ma ON ma.id = mo.make_id
+     WHERE ma.slug = $1
+     ORDER BY mo.name ASC`,
+    [slug],
+  );
+}
+
+export async function listModelsByMakeId(makeId: string): Promise<Model[]> {
+  return query<Model>(
+    `SELECT id, make_id AS "makeId", slug, name
+     FROM models
+     WHERE make_id = $1
+     ORDER BY name ASC`,
+    [makeId],
+  );
+}
+
+// Cross-make model lookup for autocomplete (PR3b).
+export async function searchModels(q: string, limit = 5): Promise<(Model & { makeName: string; makeSlug: string })[]> {
+  return query<Model & { makeName: string; makeSlug: string }>(
+    `SELECT mo.id, mo.make_id AS "makeId", mo.slug, mo.name,
+            ma.name AS "makeName", ma.slug AS "makeSlug"
+     FROM models mo
+     JOIN makes ma ON ma.id = mo.make_id
+     WHERE mo.name ILIKE $1
+     ORDER BY mo.name ASC
+     LIMIT $2`,
+    [`%${q}%`, limit],
+  );
+}
+
+export async function searchDealers(
+  q: string, limit = 3,
+): Promise<{ id: string; businessName: string; location: string }[]> {
+  return query<{ id: string; businessName: string; location: string }>(
+    `SELECT id, business_name AS "businessName", location
+     FROM dealers
+     WHERE status = 'approved'
+       AND business_name ILIKE $1
+     ORDER BY business_name ASC
+     LIMIT $2`,
+    [`%${q}%`, limit],
+  );
+}
+
+// ── Batch lookup by ID (PR3d) ───────────────────────────────────────────────
+// Used for wishlist and recently-viewed — both store car IDs in localStorage
+// and need to resolve them to full Car records. Comparing as TEXT avoids the
+// UUID-cast pitfall when the input contains static demo IDs ("1", "2") that
+// were committed to a user's localStorage during dev. Order is NOT preserved
+// here — the caller restores it.
+export async function getCarsByIds(ids: string[]): Promise<Car[]> {
+  if (!ids.length) return [];
+
+  type Row = {
+    id: string; slug: string; year: number; make: string; model: string;
+    trim: string | null; price: number | string; mileage: number; fuel: string;
+    transmission: string; bodyType: string; condition: string; location: string;
+    description: string; images: string[]; features: string[]; verified: boolean;
+    financingAvailable: boolean; hirePurchaseAvailable: boolean;
+    isFeatured: boolean | null;
+    drivetrain: string | null; engineSizeL: number | string | null;
+    previousOwners: number | null; exteriorColor: string | null;
+    interiorColor: string | null; sellerType: string | null;
+    createdAt: string;
+    dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
+  };
+
+  const rows = await query<Row>(
+    `SELECT c.id, c.slug, c.year, c.make, c.model, c.trim,
+            c.price, c.mileage, c.fuel, c.transmission,
+            c.body_type        AS "bodyType",
+            c.condition, c.location, c.description, c.images, c.features,
+            c.verified,
+            c.financing_available     AS "financingAvailable",
+            c.hire_purchase_available AS "hirePurchaseAvailable",
+            c.is_featured             AS "isFeatured",
+            c.drivetrain,
+            c.engine_size_l    AS "engineSizeL",
+            c.previous_owners  AS "previousOwners",
+            c.exterior_color   AS "exteriorColor",
+            c.interior_color   AS "interiorColor",
+            c.seller_type      AS "sellerType",
+            c.created_at       AS "createdAt",
+            COALESCE(d.business_name, c.seller_name) AS "dealerName",
+            COALESCE(d.location, c.location)         AS "dealerLocation",
+            COALESCE(d.phone, c.seller_phone)        AS "dealerPhone"
+     FROM cars c
+     LEFT JOIN dealers d ON d.id = c.dealer_id
+     WHERE c.id::text = ANY($1::text[])`,
+    // Visibility filter is intentionally OMITTED here. Wishlist and
+    // recently-viewed must resolve any saved car — even one that has since
+    // been hidden by the quality policy — so the buyer can still see what
+    // they previously saved. See visibility matrix in the project spec.
+    [ids],
+  );
+
+  return rows.map((r) => ({
+    id: r.id, slug: r.slug, year: r.year, make: r.make, model: r.model,
+    trim: r.trim ?? undefined,
+    price: Number(r.price),
+    mileage: r.mileage,
+    fuel: r.fuel as Car["fuel"],
+    transmission: r.transmission as Car["transmission"],
+    bodyType: r.bodyType as Car["bodyType"],
+    condition: r.condition as Car["condition"],
+    location: r.location,
+    description: r.description,
+    images: r.images?.length ? r.images : ["/placeholder-car.jpg"],
+    features: r.features ?? [],
+    verified: r.verified,
+    isFeatured: r.isFeatured ?? false,
+    financingAvailable:    r.financingAvailable,
+    hirePurchaseAvailable: r.hirePurchaseAvailable,
+    drivetrain:     (r.drivetrain    ?? undefined) as Car["drivetrain"],
+    engineSizeL:    r.engineSizeL    !== null ? Number(r.engineSizeL) : undefined,
+    previousOwners: r.previousOwners ?? undefined,
+    exteriorColor:  r.exteriorColor  ?? undefined,
+    interiorColor:  r.interiorColor  ?? undefined,
+    sellerType:     (r.sellerType    ?? undefined) as Car["sellerType"],
+    createdAt: r.createdAt,
+    dealer: {
+      name:     r.dealerName     ?? "Agnora Dealer",
+      rating:   0,
+      reviews:  0,
+      location: r.dealerLocation ?? "",
+      phone:    r.dealerPhone    ?? "",
+    },
+  }));
+}
+
+// ── Public detail lookup ────────────────────────────────────────────────────
+// Single source of truth for the public detail page. Uses the visibility
+// helper so it matches /cars search exactly — anything visible in search is
+// reachable here, anything hidden returns null.
+//
+// In development only: when the lookup returns null, we run a tiny diagnostic
+// query against the same slug (no visibility filter) and log why the listing
+// was hidden. Never exposed in production.
+export async function getCarBySlug(slug: string): Promise<Car | null> {
+  type Row = {
+    id: string; slug: string; year: number; make: string; model: string;
+    trim: string | null; price: number | string; mileage: number; fuel: string;
+    transmission: string; bodyType: string; condition: string; location: string;
+    description: string; images: string[]; features: string[]; verified: boolean;
+    financingAvailable: boolean; hirePurchaseAvailable: boolean;
+    isFeatured: boolean | null;
+    drivetrain: string | null; engineSizeL: number | string | null;
+    previousOwners: number | null; exteriorColor: string | null;
+    interiorColor: string | null; sellerType: string | null;
+    vin: string | null; vinVerified: boolean;
+    serviceHistoryAvailable: boolean; ownershipVerified: boolean; inspectionAvailable: boolean;
+    createdAt: string;
+    dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
+  };
+
+  const rows = await query<Row>(
+    `SELECT c.id, c.slug, c.year, c.make, c.model, c.trim,
+            c.price, c.mileage, c.fuel, c.transmission,
+            c.body_type        AS "bodyType",
+            c.condition, c.location, c.description, c.images, c.features,
+            c.verified,
+            c.financing_available     AS "financingAvailable",
+            c.hire_purchase_available AS "hirePurchaseAvailable",
+            c.is_featured             AS "isFeatured",
+            c.drivetrain,
+            c.engine_size_l    AS "engineSizeL",
+            c.previous_owners  AS "previousOwners",
+            c.exterior_color   AS "exteriorColor",
+            c.interior_color   AS "interiorColor",
+            c.seller_type      AS "sellerType",
+            c.vin,
+            c.vin_verified                AS "vinVerified",
+            c.service_history_available   AS "serviceHistoryAvailable",
+            c.ownership_verified          AS "ownershipVerified",
+            c.inspection_available        AS "inspectionAvailable",
+            c.created_at       AS "createdAt",
+            COALESCE(d.business_name, c.seller_name) AS "dealerName",
+            COALESCE(d.location, c.location)         AS "dealerLocation",
+            COALESCE(d.phone, c.seller_phone)        AS "dealerPhone"
+     FROM cars c
+     LEFT JOIN dealers d ON d.id = c.dealer_id
+     WHERE c.slug = $1
+       AND ${buildPublicListingVisibilityWhere("c")}
+     LIMIT 1`,
+    [slug],
+  );
+
+  if (rows.length === 0) {
+    if (process.env.NODE_ENV !== "production") {
+      await logHiddenDetailMiss(slug);
+    }
+    return null;
+  }
+
+  const r = rows[0];
+  return {
+    id: r.id, slug: r.slug, year: r.year, make: r.make, model: r.model,
+    trim: r.trim ?? undefined,
+    price: Number(r.price),
+    mileage: r.mileage,
+    fuel: r.fuel as Car["fuel"],
+    transmission: r.transmission as Car["transmission"],
+    bodyType: r.bodyType as Car["bodyType"],
+    condition: r.condition as Car["condition"],
+    location: r.location,
+    description: r.description,
+    images: r.images?.length ? r.images : ["/placeholder-car.jpg"],
+    features: r.features ?? [],
+    verified: r.verified,
+    isFeatured: r.isFeatured ?? false,
+    financingAvailable:    r.financingAvailable,
+    hirePurchaseAvailable: r.hirePurchaseAvailable,
+    drivetrain:     (r.drivetrain     ?? undefined) as Car["drivetrain"],
+    engineSizeL:    r.engineSizeL    != null ? Number(r.engineSizeL) : undefined,
+    previousOwners: r.previousOwners ?? undefined,
+    exteriorColor:  r.exteriorColor  ?? undefined,
+    interiorColor:  r.interiorColor  ?? undefined,
+    sellerType:     (r.sellerType    ?? undefined) as Car["sellerType"],
+    vin:                     r.vin ?? undefined,
+    vinVerified:             r.vinVerified,
+    serviceHistoryAvailable: r.serviceHistoryAvailable,
+    ownershipVerified:       r.ownershipVerified,
+    inspectionAvailable:     r.inspectionAvailable,
+    createdAt: r.createdAt,
+    dealer: {
+      name:     r.dealerName     ?? "Agnora Dealer",
+      rating:   0,
+      reviews:  0,
+      location: r.dealerLocation ?? "",
+      phone:    r.dealerPhone    ?? "",
+    },
+  };
+}
+
+// Dev-only: explains WHY a slug came back null from getCarBySlug. Probes the
+// underlying row (no visibility filter) and re-evaluates the policy bits so
+// the developer can see at a glance whether the issue was status, photo
+// count, missing VIN, or simply that the slug doesn't exist.
+async function logHiddenDetailMiss(slug: string): Promise<void> {
+  try {
+    const rows = await query<{
+      slug: string; status: string; createdAt: string;
+      photoCount: number; vinLength: number;
+    }>(
+      `SELECT slug, status,
+              created_at::text                              AS "createdAt",
+              COALESCE(array_length(images, 1), 0)::INT     AS "photoCount",
+              COALESCE(LENGTH(vin), 0)::INT                 AS "vinLength"
+       FROM cars WHERE slug = $1 LIMIT 1`,
+      [slug],
+    );
+    if (rows.length === 0) {
+      console.log(`[getCarBySlug] slug=%s not found in cars table`, slug);
+      return;
+    }
+    const r = rows[0];
+    const grandfathered = r.createdAt < QUALITY_POLICY_CUTOFF;
+    const meetsBar      = r.photoCount >= MIN_PUBLISH_PHOTOS && r.vinLength >= MIN_VIN_LEN;
+    const isActive      = r.status === "active";
+    const wouldBeVisible = isActive && (grandfathered || meetsBar);
+    console.log(
+      `[getCarBySlug] HIDDEN slug=%s status=%s createdAt=%s photos=%d vinLen=%d ` +
+      `grandfathered=%s meetsBar=%s isActive=%s -> visible=%s`,
+      slug, r.status, r.createdAt, r.photoCount, r.vinLength,
+      grandfathered, meetsBar, isActive, wouldBeVisible,
+    );
+  } catch (err) {
+    console.warn("[getCarBySlug] diagnostic probe failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+// ── Cars search (PR2 of the search redesign) ────────────────────────────────
+// Server-side filtering + faceted aggregation. Replaces the client-side filter
+// in components/cars-listing.tsx. Universal text search covers make, model,
+// trim, description, location, body type, fuel, transmission, and the
+// dealer/seller name. Multi-value filters accept both display names and
+// slugs (case-insensitive, hyphen-normalized) so the UI cascade from PR1
+// can submit either form during the data-migration transition.
+//
+// PR3c: facet counts use *independent* aggregation — for each facet dimension,
+// every filter EXCEPT that dimension is applied. So picking Toyota in Makes
+// no longer collapses the Makes facet to "Toyota (N)"; the other makes still
+// show their counts.
+
+type FacetDim =
+  | "make" | "model" | "body" | "fuel" | "condition" | "transmission" | "location"
+  | "drivetrain" | "exterior_color" | "seller_type";
+
+function pushIn(
+  col: string,
+  values: string[],
+  conditions: string[],
+  params: unknown[],
+  idx: { v: number },
+  slugify: boolean,
+): void {
+  const lowered = values.map((v) => v.toLowerCase());
+  const i = idx.v++;
+  if (slugify) {
+    conditions.push(`LOWER(REPLACE(${col}, ' ', '-')) = ANY($${i}::text[])`);
+  } else {
+    conditions.push(`LOWER(${col}) = ANY($${i}::text[])`);
+  }
+  params.push(lowered);
+}
+
+/**
+ * Build the SQL WHERE clause + parameter array for a search.
+ * When `exclude` is set, that dimension's multi-value filter is dropped so
+ * the resulting query can be used to compute an "independent" facet count.
+ */
+function buildSearchWhere(
+  filters: SearchFilters,
+  exclude?: FacetDim,
+): { whereSql: string; params: unknown[] } {
+  // Single source of truth for public visibility: status + grandfather +
+  // photo/VIN bar. Anything beyond visibility is a user-facing filter and
+  // lives below.
+  const conditions: string[] = [buildPublicListingVisibilityWhere("c")];
+  const params: unknown[]   = [];
+  const idx                  = { v: 1 };
+
+  if (filters.q) {
+    const i = idx.v++;
+    conditions.push(`(
+      c.make            ILIKE $${i} OR
+      c.model           ILIKE $${i} OR
+      COALESCE(c.trim, '') ILIKE $${i} OR
+      c.description     ILIKE $${i} OR
+      c.location        ILIKE $${i} OR
+      c.body_type       ILIKE $${i} OR
+      c.fuel            ILIKE $${i} OR
+      c.transmission    ILIKE $${i} OR
+      COALESCE(c.seller_name, '')      ILIKE $${i} OR
+      COALESCE(d.business_name, '')    ILIKE $${i}
+    )`);
+    params.push(`%${filters.q}%`);
+  }
+
+  if (exclude !== "make"           && filters.makes?.length)          pushIn("c.make",          filters.makes,          conditions, params, idx, true);
+  if (exclude !== "model"          && filters.models?.length)         pushIn("c.model",         filters.models,         conditions, params, idx, true);
+  if (exclude !== "body"           && filters.bodyTypes?.length)      pushIn("c.body_type",     filters.bodyTypes,      conditions, params, idx, false);
+  if (exclude !== "fuel"           && filters.fuels?.length)          pushIn("c.fuel",          filters.fuels,          conditions, params, idx, false);
+  if (exclude !== "condition"      && filters.conditions?.length)     pushIn("c.condition",     filters.conditions,     conditions, params, idx, false);
+  if (exclude !== "transmission"   && filters.transmissions?.length)  pushIn("c.transmission",  filters.transmissions,  conditions, params, idx, false);
+  if (exclude !== "location"       && filters.locations?.length)      pushIn("c.location",      filters.locations,      conditions, params, idx, false);
+  if (exclude !== "drivetrain"     && filters.drivetrains?.length)    pushIn("c.drivetrain",    filters.drivetrains,    conditions, params, idx, false);
+  if (exclude !== "exterior_color" && filters.exteriorColors?.length) pushIn("c.exterior_color",filters.exteriorColors, conditions, params, idx, false);
+  if (exclude !== "seller_type"    && filters.sellerTypes?.length)    pushIn("c.seller_type",   filters.sellerTypes,    conditions, params, idx, false);
+  if (filters.interiorColors?.length) pushIn("c.interior_color", filters.interiorColors, conditions, params, idx, false);
+
+  if (filters.minPrice      !== undefined) { const i = idx.v++; conditions.push(`c.price          >= $${i}`); params.push(filters.minPrice); }
+  if (filters.maxPrice      !== undefined) { const i = idx.v++; conditions.push(`c.price          <= $${i}`); params.push(filters.maxPrice); }
+  if (filters.minYear       !== undefined) { const i = idx.v++; conditions.push(`c.year           >= $${i}`); params.push(filters.minYear); }
+  if (filters.maxYear       !== undefined) { const i = idx.v++; conditions.push(`c.year           <= $${i}`); params.push(filters.maxYear); }
+  if (filters.minMileage    !== undefined) { const i = idx.v++; conditions.push(`c.mileage        >= $${i}`); params.push(filters.minMileage); }
+  if (filters.maxMileage    !== undefined) { const i = idx.v++; conditions.push(`c.mileage        <= $${i}`); params.push(filters.maxMileage); }
+  if (filters.minEngineSize !== undefined) { const i = idx.v++; conditions.push(`c.engine_size_l  >= $${i}`); params.push(filters.minEngineSize); }
+  if (filters.maxEngineSize !== undefined) { const i = idx.v++; conditions.push(`c.engine_size_l  <= $${i}`); params.push(filters.maxEngineSize); }
+  if (filters.maxOwners     !== undefined) { const i = idx.v++; conditions.push(`c.previous_owners <= $${i}`); params.push(filters.maxOwners); }
+
+  if (filters.financing)      conditions.push("c.financing_available         = TRUE");
+  if (filters.hirePurchase)   conditions.push("c.hire_purchase_available     = TRUE");
+  if (filters.verifiedOnly)   conditions.push("c.verified                    = TRUE");
+  if (filters.trustInspection) conditions.push("c.inspection_available        = TRUE");
+  if (filters.trustService)    conditions.push("c.service_history_available   = TRUE");
+  if (filters.trustOwnership)  conditions.push("c.ownership_verified          = TRUE");
+  if (filters.trustVin)        conditions.push("c.vin_verified                = TRUE");
+  // PR6: trustBelowMarket is NOT added here — it requires per-query handling
+  // (LATERAL join in results, correlated subquery in total). Facet queries
+  // intentionally skip it to keep aggregation cost bounded.
+
+  // PR5: radius haversine. Applies only when one location is chosen and
+  // radius > 0. Skipped when computing the location facet (the centre would
+  // be the filter we're trying to ignore).
+  if (
+    exclude !== "location" &&
+    filters.radiusKm && filters.radiusKm > 0 &&
+    filters.locations?.length === 1
+  ) {
+    const centroid = getCentroid(filters.locations[0]);
+    if (centroid) {
+      const iLat = idx.v++;
+      const iLng = idx.v++;
+      const iKm  = idx.v++;
+      conditions.push(
+        `c.latitude IS NOT NULL AND c.longitude IS NOT NULL AND ` +
+        `(6371 * acos(
+            LEAST(1, GREATEST(-1,
+              cos(radians($${iLat})) * cos(radians(c.latitude)) * cos(radians(c.longitude) - radians($${iLng}))
+              + sin(radians($${iLat})) * sin(radians(c.latitude))
+            ))
+        )) <= $${iKm}`,
+      );
+      params.push(centroid.lat, centroid.lng, filters.radiusKm);
+    }
+  }
+
+  return { whereSql: conditions.join(" AND "), params };
+}
+
+export async function searchCarsDb(filters: SearchFilters): Promise<SearchResponse> {
+  // Expand Kenya-market aliases so free-text "benz" still finds Mercedes-Benz
+  // cars even though they're stored as "Mercedes-Benz" in cars.make.
+  const effective: SearchFilters = filters.q
+    ? { ...filters, q: expandAliases(filters.q).expanded }
+    : filters;
+
+  const base   = buildSearchWhere(effective);
+  const facetW = {
+    make:           buildSearchWhere(effective, "make"),
+    body:           buildSearchWhere(effective, "body"),
+    fuel:           buildSearchWhere(effective, "fuel"),
+    condition:      buildSearchWhere(effective, "condition"),
+    transmission:   buildSearchWhere(effective, "transmission"),
+    location:       buildSearchWhere(effective, "location"),
+    drivetrain:     buildSearchWhere(effective, "drivetrain"),
+    exteriorColor:  buildSearchWhere(effective, "exterior_color"),
+    sellerType:     buildSearchWhere(effective, "seller_type"),
+  };
+
+  const limit  = effective.limit ?? 20;
+  const page   = effective.page  ?? 1;
+  const offset = (page - 1) * limit;
+
+  const orderBy = (() => {
+    switch (effective.sort) {
+      case "price_asc":   return "c.price ASC, c.created_at DESC";
+      case "price_desc":  return "c.price DESC, c.created_at DESC";
+      case "mileage_asc": return "c.mileage ASC, c.created_at DESC";
+      case "year_desc":   return "c.year DESC, c.created_at DESC";
+      case "featured":    return "c.is_featured DESC NULLS LAST, c.created_at DESC";
+      case "newest":
+      default:            return "c.created_at DESC";
+    }
+  })();
+
+  // PR6: market-price classification thresholds (mirror constants in lib/search.ts).
+  const GREAT_DEAL_THRESHOLD   = 0.92;
+  const ABOVE_MARKET_THRESHOLD = 1.08;
+  const MIN_COMPARABLES        = 3;
+  const trustBM = effective.trustBelowMarket;
+
+  // Correlated subquery for trustBelowMarket — used in total query.
+  // Returns NULL when fewer than MIN_COMPARABLES comparables exist, which
+  // makes `c.price <= NULL` evaluate to NULL → row excluded.
+  const belowMarketCorrSql = trustBM ? `
+    AND c.price <= (
+      SELECT AVG(c2.price) * ${GREAT_DEAL_THRESHOLD}
+      FROM cars c2
+      WHERE c2.make = c.make AND c2.model = c.model
+        AND ABS(c2.year - c.year) <= 1
+        AND c2.id != c.id
+        AND c2.status = 'active'
+      HAVING COUNT(*) >= ${MIN_COMPARABLES}
+    )` : "";
+
+  // Results query: all filters applied, paginated. LATERAL join computes
+  // marketAvg + sample_count once per result row (cheap with make+model index).
+  const resultsSql = `
+    SELECT c.id, c.slug, c.year, c.make, c.model, c.trim,
+           c.price, c.mileage, c.fuel, c.transmission,
+           c.body_type        AS "bodyType",
+           c.condition, c.location, c.description, c.images, c.features,
+           c.verified,
+           c.financing_available     AS "financingAvailable",
+           c.hire_purchase_available AS "hirePurchaseAvailable",
+           c.is_featured             AS "isFeatured",
+           c.drivetrain,
+           c.engine_size_l    AS "engineSizeL",
+           c.previous_owners  AS "previousOwners",
+           c.exterior_color   AS "exteriorColor",
+           c.interior_color   AS "interiorColor",
+           c.seller_type      AS "sellerType",
+           c.vin_verified              AS "vinVerified",
+           c.service_history_available AS "serviceHistoryAvailable",
+           c.ownership_verified        AS "ownershipVerified",
+           c.inspection_available      AS "inspectionAvailable",
+           sim.avg_price              AS "marketAvg",
+           sim.sample_count           AS "marketSampleCount",
+           CASE
+             WHEN sim.avg_price IS NULL OR sim.sample_count < ${MIN_COMPARABLES} THEN NULL
+             WHEN c.price <= sim.avg_price * ${GREAT_DEAL_THRESHOLD}   THEN 'great'
+             WHEN c.price >= sim.avg_price * ${ABOVE_MARKET_THRESHOLD} THEN 'above'
+             ELSE 'fair'
+           END AS "priceTier",
+           c.created_at       AS "createdAt",
+           COALESCE(d.business_name, c.seller_name) AS "dealerName",
+           COALESCE(d.location, c.location)         AS "dealerLocation",
+           COALESCE(d.phone, c.seller_phone)        AS "dealerPhone"
+    FROM cars c
+    LEFT JOIN dealers d ON d.id = c.dealer_id
+    LEFT JOIN LATERAL (
+      SELECT AVG(c2.price)::NUMERIC AS avg_price, COUNT(*)::INT AS sample_count
+      FROM cars c2
+      WHERE c2.make = c.make AND c2.model = c.model
+        AND ABS(c2.year - c.year) <= 1
+        AND c2.id != c.id
+        AND c2.status = 'active'
+    ) sim ON TRUE
+    WHERE ${base.whereSql}
+      ${trustBM ? `AND sim.sample_count >= ${MIN_COMPARABLES} AND c.price <= sim.avg_price * ${GREAT_DEAL_THRESHOLD}` : ""}
+    ORDER BY ${orderBy}
+    LIMIT $${base.params.length + 1} OFFSET $${base.params.length + 2}
+  `;
+
+  // Total count: same WHERE as results, plus trustBelowMarket correlated subquery.
+  const totalSql = `
+    SELECT COUNT(*)::INT AS count
+    FROM cars c LEFT JOIN dealers d ON d.id = c.dealer_id
+    WHERE ${base.whereSql}
+      ${belowMarketCorrSql}
+  `;
+
+  // Per-facet aggregation queries — each excludes its own dimension's filter.
+  // Every facet column lives on `cars`, so qualify with `c.` to avoid the
+  // `location` column being ambiguous against `dealers.location` (the JOIN
+  // makes both visible to the planner).
+  const facetSql = (col: string, whereSql: string) => `
+    SELECT c.${col} AS value, COUNT(*)::INT AS count
+    FROM cars c LEFT JOIN dealers d ON d.id = c.dealer_id
+    WHERE ${whereSql}
+    GROUP BY c.${col}
+  `;
+
+  type ResultRow = {
+    id: string; slug: string; year: number; make: string; model: string;
+    trim: string | null; price: number | string; mileage: number; fuel: string;
+    transmission: string; bodyType: string; condition: string; location: string;
+    description: string; images: string[]; features: string[]; verified: boolean;
+    financingAvailable: boolean; hirePurchaseAvailable: boolean;
+    isFeatured: boolean | null;
+    drivetrain: string | null; engineSizeL: number | string | null;
+    previousOwners: number | null; exteriorColor: string | null;
+    interiorColor: string | null; sellerType: string | null;
+    vinVerified: boolean | null; serviceHistoryAvailable: boolean | null;
+    ownershipVerified: boolean | null; inspectionAvailable: boolean | null;
+    marketAvg: number | string | null; marketSampleCount: number | null;
+    priceTier: string | null;
+    createdAt: string;
+    dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
+  };
+  type FacetRow = { value: string; count: number };
+
+  const [
+    rows, totalRows,
+    makesRows, bodyRows, fuelRows, conditionRows, locationRows, transmissionRows,
+    drivetrainRows, exteriorColorRows, sellerTypeRows,
+  ] = await Promise.all([
+    query<ResultRow>(resultsSql, [...base.params, limit, offset]),
+    query<{ count: number }>(totalSql,                                       base.params),
+    query<FacetRow>(facetSql("make",           facetW.make.whereSql),           facetW.make.params),
+    query<FacetRow>(facetSql("body_type",      facetW.body.whereSql),           facetW.body.params),
+    query<FacetRow>(facetSql("fuel",           facetW.fuel.whereSql),           facetW.fuel.params),
+    query<FacetRow>(facetSql("condition",      facetW.condition.whereSql),      facetW.condition.params),
+    query<FacetRow>(facetSql("location",       facetW.location.whereSql),       facetW.location.params),
+    query<FacetRow>(facetSql("transmission",   facetW.transmission.whereSql),   facetW.transmission.params),
+    query<FacetRow>(facetSql("drivetrain",     facetW.drivetrain.whereSql),     facetW.drivetrain.params),
+    query<FacetRow>(facetSql("exterior_color", facetW.exteriorColor.whereSql),  facetW.exteriorColor.params),
+    query<FacetRow>(facetSql("seller_type",    facetW.sellerType.whereSql),     facetW.sellerType.params),
+  ]);
+
+  const total = totalRows[0]?.count ?? 0;
+
+  const sorter = (buckets: FacetBucket[]) => buckets.sort(
+    (a, b) => b.count - a.count || a.value.localeCompare(b.value),
+  );
+  const toBuckets = (rows: FacetRow[]): FacetBucket[] => {
+    const buckets = rows
+      .filter((r) => r.value != null && r.value !== "")
+      .map((r) => ({ value: r.value, count: r.count }));
+    sorter(buckets);
+    return buckets;
+  };
+
+  const facets: SearchFacets = {
+    makes:          toBuckets(makesRows),
+    bodyTypes:      toBuckets(bodyRows),
+    fuels:          toBuckets(fuelRows),
+    conditions:     toBuckets(conditionRows),
+    locations:      toBuckets(locationRows),
+    transmissions:  toBuckets(transmissionRows),
+    drivetrains:    toBuckets(drivetrainRows),
+    exteriorColors: toBuckets(exteriorColorRows),
+    sellerTypes:    toBuckets(sellerTypeRows),
+  };
+
+  const cars: Car[] = rows.map((r) => ({
+    id: r.id, slug: r.slug, year: r.year, make: r.make, model: r.model,
+    trim: r.trim ?? undefined,
+    price: Number(r.price),
+    mileage: r.mileage,
+    fuel: r.fuel as Car["fuel"],
+    transmission: r.transmission as Car["transmission"],
+    bodyType: r.bodyType as Car["bodyType"],
+    condition: r.condition as Car["condition"],
+    location: r.location,
+    description: r.description,
+    images: r.images?.length ? r.images : ["/placeholder-car.jpg"],
+    features: r.features ?? [],
+    verified: r.verified,
+    isFeatured: r.isFeatured ?? false,
+    financingAvailable:    r.financingAvailable,
+    hirePurchaseAvailable: r.hirePurchaseAvailable,
+    drivetrain:     (r.drivetrain    ?? undefined) as Car["drivetrain"],
+    engineSizeL:    r.engineSizeL    !== null ? Number(r.engineSizeL) : undefined,
+    previousOwners: r.previousOwners ?? undefined,
+    exteriorColor:  r.exteriorColor  ?? undefined,
+    interiorColor:  r.interiorColor  ?? undefined,
+    sellerType:     (r.sellerType    ?? undefined) as Car["sellerType"],
+    vinVerified:             r.vinVerified             ?? undefined,
+    serviceHistoryAvailable: r.serviceHistoryAvailable ?? undefined,
+    ownershipVerified:       r.ownershipVerified       ?? undefined,
+    inspectionAvailable:     r.inspectionAvailable     ?? undefined,
+    marketAvg:               r.marketAvg         !== null ? Math.round(Number(r.marketAvg)) : undefined,
+    marketSampleCount:       r.marketSampleCount ?? undefined,
+    priceTier:               (r.priceTier ?? undefined) as Car["priceTier"],
+    createdAt: r.createdAt,
+    dealer: {
+      name:     r.dealerName     ?? "Agnora Dealer",
+      rating:   0,
+      reviews:  0,
+      location: r.dealerLocation ?? "",
+      phone:    r.dealerPhone    ?? "",
+    },
+  }));
+
+  return {
+    cars,
+    total,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+    facets,
+    source: "db",
+  };
 }

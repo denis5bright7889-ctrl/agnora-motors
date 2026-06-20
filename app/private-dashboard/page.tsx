@@ -160,7 +160,7 @@ export default async function PrivateDashboardPage() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <h1 className="font-display text-3xl font-medium">
-              Hi, {displayName.split(" ")[0]} 👋
+              Hi, {displayName.split(" ")[0]}
             </h1>
             <p className="text-muted mt-0.5 text-sm">
               Private seller · {plan.name} plan

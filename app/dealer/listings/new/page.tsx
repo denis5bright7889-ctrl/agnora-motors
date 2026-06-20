@@ -25,6 +25,19 @@ const schema = z.object({
   financingAvailable: z.boolean().default(false),
   hirePurchaseAvailable: z.boolean().default(false),
   status: z.enum(["active", "draft"]).default("active"),
+  // PR4b — all optional. preprocess turns empty <input> strings into undefined
+  // so an unfilled field doesn't trip the numeric/enum validators.
+  drivetrain:     z.preprocess((v) => v === "" ? undefined : v, z.enum(["fwd","rwd","awd","4wd"]).optional()),
+  engineSizeL:    z.preprocess((v) => v === "" || v == null ? undefined : Number(v), z.number().min(0.5).max(8.0).optional()),
+  previousOwners: z.preprocess((v) => v === "" || v == null ? undefined : Number(v), z.number().int().min(0).max(20).optional()),
+  exteriorColor:  z.preprocess((v) => v === "" ? undefined : v, z.string().max(40).optional()),
+  interiorColor:  z.preprocess((v) => v === "" ? undefined : v, z.string().max(40).optional()),
+  // PR6b — VIN + trust flags.
+  vin:                      z.preprocess((v) => v === "" ? undefined : v, z.string().min(11).max(20).optional()),
+  vinVerified:              z.boolean().default(false),
+  serviceHistoryAvailable:  z.boolean().default(false),
+  ownershipVerified:        z.boolean().default(false),
+  inspectionAvailable:      z.boolean().default(false),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -41,6 +54,10 @@ const FEATURES_PRESETS = [
   "Apple CarPlay", "Android Auto", "Blind Spot Monitor", "Lane Assist",
   "360° Camera", "Wireless Charging", "Tow Package", "4WD/AWD",
 ];
+const EXTERIOR_COLORS = [
+  "Black","White","Silver","Gray","Red","Blue","Green","Beige","Brown","Yellow",
+];
+const INTERIOR_COLORS = ["Black","Gray","Beige","Brown","White","Red"];
 
 export default function NewListingPage() {
   const router = useRouter();
@@ -86,18 +103,31 @@ export default function NewListingPage() {
     }
   }
 
+  const [serverError, setServerError] = useState<string>("");
+  const [intendedStatus, setIntendedStatus] = useState<"active" | "draft">("active");
+
   async function onSubmit(data: FormData) {
+    setServerError("");
+    const payload = { ...data, images, features, status: intendedStatus };
     const res = await fetch("/api/dealer/listings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...data, images, features }),
+      body: JSON.stringify(payload),
     });
 
-    if (res.ok) {
-      setSaved(true);
-      setTimeout(() => router.push("/dealer/listings"), 1500);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setServerError(body.error ?? "Failed to save listing. Please try again.");
+      return;
     }
+    setSaved(true);
+    setTimeout(() => router.push("/dealer/listings"), 1500);
   }
+
+  // PR7: publishing requires the photo quality bar. VIN is validated server-side.
+  const MIN_PUBLISH_PHOTOS = 10;
+  const photosNeeded       = Math.max(0, MIN_PUBLISH_PHOTOS - images.length);
+  const publishBlocked     = photosNeeded > 0;
 
   if (saved) {
     return (
@@ -125,7 +155,16 @@ export default function NewListingPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-8">
         {/* ── Images ── */}
-        <Section title="Photos" description="Upload up to 10 photos. First photo is the cover.">
+        <Section
+          title="Photos"
+          description={
+            `Upload up to 10 photos. First photo is the cover. ` +
+            `Publishing requires at least ${MIN_PUBLISH_PHOTOS} — ` +
+            (images.length >= MIN_PUBLISH_PHOTOS
+              ? "you're ready to publish."
+              : `${photosNeeded} more to go.`)
+          }
+        >
           <input
             ref={fileRef as React.RefObject<HTMLInputElement>}
             type="file"
@@ -274,6 +313,103 @@ export default function NewListingPage() {
           </div>
         </Section>
 
+        {/* ── Specifications (PR4b) ── */}
+        <Section title="Specifications" description="Optional but strongly recommended — buyers filter by these.">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <Field label="Drivetrain">
+              <select {...register("drivetrain")} className={selectCls(false)}>
+                <option value="">Not specified</option>
+                <option value="fwd">FWD — Front-wheel drive</option>
+                <option value="rwd">RWD — Rear-wheel drive</option>
+                <option value="awd">AWD — All-wheel drive</option>
+                <option value="4wd">4WD — Four-wheel drive</option>
+              </select>
+            </Field>
+            <Field label="Engine size (L)" error={errors.engineSizeL?.message as string | undefined}>
+              <input
+                {...register("engineSizeL")}
+                type="number"
+                step="0.1"
+                placeholder="e.g. 2.0"
+                className={inputCls(!!errors.engineSizeL)}
+              />
+            </Field>
+            <Field label="Previous owners" error={errors.previousOwners?.message as string | undefined}>
+              <input
+                {...register("previousOwners")}
+                type="number"
+                placeholder="e.g. 1"
+                className={inputCls(!!errors.previousOwners)}
+              />
+            </Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Exterior color">
+              <select {...register("exteriorColor")} className={selectCls(false)}>
+                <option value="">Not specified</option>
+                {EXTERIOR_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Interior color">
+              <select {...register("interiorColor")} className={selectCls(false)}>
+                <option value="">Not specified</option>
+                {INTERIOR_COLORS.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+          </div>
+        </Section>
+
+        {/* ── Verification (PR6b) ── */}
+        <Section
+          title="Verification & trust"
+          description="Optional. Filled-in trust fields earn Agnora's trust badges and surface in buyer search filters."
+        >
+          <Field label="VIN / chassis number" error={errors.vin?.message as string | undefined}>
+            <input
+              {...register("vin")}
+              placeholder="17-character VIN or chassis number"
+              className={inputCls(!!errors.vin)}
+              maxLength={20}
+            />
+          </Field>
+
+          <div className="space-y-2.5 mt-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" {...register("vinVerified")}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-accent cursor-pointer" />
+              <div>
+                <p className="text-sm font-medium">VIN verified by Agnora</p>
+                <p className="text-xs text-muted">Tick only after Agnora staff confirms the VIN matches the logbook.</p>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" {...register("inspectionAvailable")}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-accent cursor-pointer" />
+              <div>
+                <p className="text-sm font-medium">Independent inspection available</p>
+                <p className="text-xs text-muted">Buyer can request a third-party pre-purchase inspection.</p>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" {...register("serviceHistoryAvailable")}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-accent cursor-pointer" />
+              <div>
+                <p className="text-sm font-medium">Service history available</p>
+                <p className="text-xs text-muted">You can provide complete or near-complete service records.</p>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" {...register("ownershipVerified")}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-accent cursor-pointer" />
+              <div>
+                <p className="text-sm font-medium">Ownership verified</p>
+                <p className="text-xs text-muted">Logbook + ID confirm current ownership matches the listing.</p>
+              </div>
+            </label>
+          </div>
+        </Section>
+
         {/* ── Description ── */}
         <Section title="Description">
           <Field label="Describe this car" error={errors.description?.message}>
@@ -368,30 +504,40 @@ export default function NewListingPage() {
         </Section>
 
         {/* ── Publish ── */}
-        <div className="flex items-center gap-4 pt-2">
-          <button
-            type="submit"
-            name="status"
-            value="active"
-            disabled={isSubmitting}
-            className="flex-1 h-12 rounded-full bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
-          >
-            {isSubmitting ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
-            ) : (
-              "Publish listing"
-            )}
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            onClick={() => {
-              // Override to draft before submit
-            }}
-            className="h-12 rounded-full border border-border px-6 text-sm font-medium hover:bg-surface-2 transition-colors"
-          >
-            Save as draft
-          </button>
+        {serverError && (
+          <div className="flex items-center gap-2 rounded-xl bg-red-500/10 border border-red-500/20 px-4 py-3 text-sm text-red-500">
+            <X className="h-4 w-4 shrink-0" />
+            {serverError}
+          </div>
+        )}
+        <div className="flex flex-col gap-2 pt-2">
+          <div className="flex items-center gap-4">
+            <button
+              type="submit"
+              onClick={() => setIntendedStatus("active")}
+              disabled={isSubmitting || publishBlocked}
+              className="flex-1 h-12 rounded-full bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+            >
+              {isSubmitting && intendedStatus === "active" ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
+              ) : (
+                "Publish listing"
+              )}
+            </button>
+            <button
+              type="submit"
+              onClick={() => setIntendedStatus("draft")}
+              disabled={isSubmitting}
+              className="h-12 rounded-full border border-border px-6 text-sm font-medium hover:bg-surface-2 transition-colors disabled:opacity-60"
+            >
+              {isSubmitting && intendedStatus === "draft" ? "Saving…" : "Save as draft"}
+            </button>
+          </div>
+          {publishBlocked && (
+            <p className="text-xs text-muted">
+              Add {photosNeeded} more photo{photosNeeded === 1 ? "" : "s"} to publish. You can save as a draft now and finish later.
+            </p>
+          )}
         </div>
       </form>
     </div>

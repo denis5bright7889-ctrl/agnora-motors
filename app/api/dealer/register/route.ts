@@ -20,16 +20,21 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
+    // `quick` signals the simplified "no KYC required" signup path; we
+    // accept placeholder business details and auto-approve so the dealer
+    // can start posting cars immediately. KYC is collected later.
+    const quick = body.quick === true;
     const dealer = await createDealer({
       userId: session.user.id,
-      businessName: body.businessName,
-      businessReg: body.businessReg,
-      kraPin: body.kraPin,
-      directorName: body.directorName,
-      directorIdUrl: body.directorIdUrl,
-      businessCertUrl: body.businessCertUrl,
-      phone: body.phone,
-      location: body.location,
+      businessName: body.businessName ?? body.directorName ?? "Dealer",
+      businessReg: body.businessReg ?? "-",
+      kraPin: body.kraPin ?? "-",
+      directorName: body.directorName ?? "",
+      directorIdUrl: body.directorIdUrl ?? "",
+      businessCertUrl: body.businessCertUrl ?? "",
+      phone: body.phone ?? "",
+      location: body.location ?? "Other",
+      status: quick ? "approved" : "pending",
     });
     return NextResponse.json({ dealer }, { status: 201 });
   } catch (err) {

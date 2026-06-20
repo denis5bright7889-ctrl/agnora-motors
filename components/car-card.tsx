@@ -88,11 +88,12 @@ export function CarCard({ car, priority, className }: Props) {
           </h3>
         </div>
 
-        <div className="flex items-baseline gap-1">
+        <div className="flex items-baseline gap-1 flex-wrap">
           <span className="text-xs font-semibold text-muted">KSh</span>
           <span className="font-display text-2xl font-semibold tracking-tight text-accent">
             {formatPrice(car.price)}
           </span>
+          {car.priceTier && <PriceTierChip tier={car.priceTier} marketAvg={car.marketAvg} />}
         </div>
 
         <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted">
@@ -111,5 +112,34 @@ export function CarCard({ car, priority, className }: Props) {
         </ul>
       </div>
     </article>
+  );
+}
+
+// PR6: price-tier chip. "Based on similar listed prices" is the v1 disclosure —
+// once real sold-price history is in place (PR8+), the source flips to actual
+// transactions without changing this component.
+function PriceTierChip({
+  tier, marketAvg,
+}: { tier: "great" | "fair" | "above"; marketAvg?: number }) {
+  const config = {
+    great: { label: "Great deal",   cls: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" },
+    fair:  { label: "Fair price",   cls: "bg-blue-500/15    text-blue-600    dark:text-blue-400    border-blue-500/25" },
+    above: { label: "Above market", cls: "bg-amber-500/15   text-amber-700   dark:text-amber-400   border-amber-500/25" },
+  }[tier];
+
+  const title = marketAvg
+    ? `Based on similar listed prices (avg KSh ${marketAvg.toLocaleString()})`
+    : "Based on similar listed prices";
+
+  return (
+    <span
+      title={title}
+      className={cn(
+        "ml-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap",
+        config.cls,
+      )}
+    >
+      {config.label}
+    </span>
   );
 }

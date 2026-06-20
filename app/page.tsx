@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
-  Car, ArrowRight, Banknote, Shield, Tag,
+  Car, CarFront, CarTaxiFront, Truck, Caravan, Zap,
+  ArrowRight, Banknote, Shield, Tag,
   MessageCircle, Globe, BookOpen, PlusCircle,
   Check, TrendingUp,
 } from "lucide-react";
@@ -9,12 +10,12 @@ import { brands } from "@/data/content";
 
 // ── Body-style categories ─────────────────────────────────────
 const CATEGORIES = [
-  { label: "SUV",       slug: "suv",       emoji: "🚙" },
-  { label: "Sedan",     slug: "sedan",     emoji: "🚗" },
-  { label: "Electric",  slug: "electric",  emoji: "⚡" },
-  { label: "Hatchback", slug: "hatchback", emoji: "🚘" },
-  { label: "Pickup",    slug: "pickup",    emoji: "🛻" },
-  { label: "Wagon",     slug: "wagon",     emoji: "🚐" },
+  { label: "SUV",       slug: "suv",       icon: CarFront },
+  { label: "Sedan",     slug: "sedan",     icon: Car },
+  { label: "Electric",  slug: "electric",  icon: Zap },
+  { label: "Hatchback", slug: "hatchback", icon: CarTaxiFront },
+  { label: "Pickup",    slug: "pickup",    icon: Truck },
+  { label: "Wagon",     slug: "wagon",     icon: Caravan },
 ];
 
 // ── Quick-action cards (2 × 2 on mobile, 4-in-a-row on desktop) ──
@@ -188,17 +189,17 @@ export default function HomePage() {
           </div>
 
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
-            {CATEGORIES.map(({ label, slug, emoji }) => (
+            {CATEGORIES.map(({ label, slug, icon: Icon }) => (
               <Link
                 key={slug}
                 href={`/cars?body=${slug}`}
                 className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-background p-4 sm:p-5 hover:border-accent hover:bg-accent-soft transition-all active:scale-95"
               >
                 <span
-                  className="text-3xl sm:text-4xl leading-none select-none"
+                  className="flex h-11 w-11 sm:h-12 sm:w-12 items-center justify-center rounded-xl bg-surface-2 text-muted group-hover:bg-accent group-hover:text-white transition-colors"
                   aria-hidden="true"
                 >
-                  {emoji}
+                  <Icon className="h-5 w-5 sm:h-6 sm:w-6" strokeWidth={1.75} />
                 </span>
                 <span className="text-xs sm:text-sm font-semibold text-center leading-tight group-hover:text-accent transition-colors">
                   {label}

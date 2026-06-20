@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { auth } from "@/auth";
 import { getUserById } from "@/lib/db";
+import { cn } from "@/lib/utils";
 import { ImpersonationBanner } from "@/components/impersonation-banner";
 import {
   LayoutDashboard,
@@ -40,6 +41,11 @@ export default async function AdminLayout({
   // Impersonation banner — middleware sets x-impersonating when cookie is present
   const reqHeaders    = await headers();
   const impersonating = reqHeaders.get("x-impersonating");
+  const pathname      = reqHeaders.get("x-pathname") ?? "";
+
+  // Overview (/admin) is a prefix of every other route, so it matches exactly.
+  const isActive = (href: string, exact?: boolean) =>
+    exact ? pathname === href : pathname === href || pathname.startsWith(href + "/");
   let impersonatedUser: { name: string | null; email: string; role: string } | null = null;
 
   if (impersonating) {
@@ -74,17 +80,26 @@ export default async function AdminLayout({
           </div>
 
           <nav className="flex-1 p-3 space-y-0.5">
-            {navItems.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted hover:bg-surface-2 hover:text-foreground transition-colors group"
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-                <ChevronRight className="ml-auto h-3 w-3 opacity-0 group-hover:opacity-50 transition-opacity" />
-              </Link>
-            ))}
+            {navItems.map(({ href, label, icon: Icon, exact }) => {
+              const active = isActive(href, exact);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors group",
+                    active
+                      ? "bg-accent-soft text-accent"
+                      : "text-muted hover:bg-surface-2 hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {label}
+                  <ChevronRight className="ml-auto h-3 w-3 opacity-0 group-hover:opacity-50 transition-opacity" />
+                </Link>
+              );
+            })}
           </nav>
 
           <div className="p-3 border-t border-border space-y-0.5">
@@ -133,16 +148,25 @@ export default async function AdminLayout({
             aria-label="Admin navigation"
             className="md:hidden flex overflow-x-auto scroll-rail gap-1.5 px-3 py-2.5 border-b border-border bg-surface/80 backdrop-blur"
           >
-            {navItems.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="flex items-center gap-1.5 shrink-0 h-8 rounded-full border border-border bg-surface-2 px-3 text-xs font-medium text-muted hover:bg-surface hover:text-foreground whitespace-nowrap transition-colors"
-              >
-                <Icon className="h-3.5 w-3.5 shrink-0" />
-                {label}
-              </Link>
-            ))}
+            {navItems.map(({ href, label, icon: Icon, exact }) => {
+              const active = isActive(href, exact);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  aria-current={active ? "page" : undefined}
+                  className={cn(
+                    "flex items-center gap-1.5 shrink-0 h-8 rounded-full border px-3 text-xs font-medium whitespace-nowrap transition-colors",
+                    active
+                      ? "border-accent bg-accent-soft text-accent"
+                      : "border-border bg-surface-2 text-muted hover:bg-surface hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5 shrink-0" />
+                  {label}
+                </Link>
+              );
+            })}
             <form
               action={async () => {
                 "use server";

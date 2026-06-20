@@ -6,8 +6,13 @@ import {
   getRevenueByMonth, getUserGrowthByMonth,
   getListingStatusBreakdown, getTopDealersByActivity,
   getAdminListingsTable, getDailyViews,
+  getAnalyticsEventTotals, getTopSearchTerms,
+  getNonCompliantListings, getListingComplianceStats,
   isDbConfigured,
 } from "@/lib/db";
+import { QUALITY_POLICY_CUTOFF } from "@/lib/quality-policy";
+import { AlertTriangle, ImageOff, FileWarning, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { formatPrice } from "@/lib/utils";
 import { ListingsTable } from "./listings-table";
 import { LiveDashboard } from "./live-dashboard";
@@ -191,6 +196,7 @@ export default async function AdminAnalyticsPage() {
   const [
     stats, totalRevenue, revenueRaw, growthRaw,
     statusBreakdown, topDealers, dailyViews, listings,
+    eventTotals, topSearches, nonCompliant, complianceStats,
   ] = await Promise.all([
     dbUp ? getAdminStats()                  : Promise.resolve({ totalCars: 0, totalDealers: 0, totalUsers: 0, pendingDealers: 0, totalSearches: 0, totalContacts: 0 }),
     dbUp ? getTotalRevenue()                : Promise.resolve(0),
@@ -200,7 +206,18 @@ export default async function AdminAnalyticsPage() {
     dbUp ? getTopDealersByActivity(10)      : Promise.resolve([]),
     dbUp ? getDailyViews(30)               : Promise.resolve([]),
     dbUp ? getAdminListingsTable({ limit: 200 }) : Promise.resolve([]),
+    dbUp ? getAnalyticsEventTotals(7, 12)   : Promise.resolve([]),
+    dbUp ? getTopSearchTerms(7, 10)         : Promise.resolve([]),
+    dbUp ? getNonCompliantListings(50)      : Promise.resolve([]),
+    dbUp ? getListingComplianceStats()      : Promise.resolve({ grandfathered: 0, compliant: 0, hidden: 0 }),
   ]);
+
+  // PR8: derive conversion rate from PR3b/PR8 events.
+  const searchSubmissions = eventTotals.find((e) => e.name === "search_submitted")?.total ?? 0;
+  const listingViews      = eventTotals.find((e) => e.name === "listing_viewed")?.total   ?? 0;
+  const contactRequests   = eventTotals.find((e) => e.name === "contact_request_created")?.total ?? 0;
+  const viewToContactPct  = listingViews > 0 ? ((contactRequests / listingViews) * 100).toFixed(1) : "0.0";
+  const searchToViewPct   = searchSubmissions > 0 ? ((listingViews / searchSubmissions) * 100).toFixed(1) : "0.0";
 
   // Fill sparse month arrays so every chart shows N bars/points
   const revenueByMonth = fillMonths(revenueRaw,    N, { revenue: 0 } as { revenue: number });
@@ -251,6 +268,171 @@ export default async function AdminAnalyticsPage() {
       {/* ── Live section (KPIs + status donut + event feed + dealer table) ──
           Server renders initial data; client subscribes to SSE and updates. */}
       <LiveDashboard initial={initialSnapshot} />
+
+      {/* ── PR8: Search & engagement funnel (last 7 days) ── */}
+      <section className="rounded-2xl border border-border bg-surface p-6">
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="font-semibold text-sm">Search & engagement funnel</h2>
+          <span className="text-[10px] uppercase tracking-widest text-muted">Last 7 days</span>
+        </div>
+        <p className="text-xs text-muted mb-4">Client-fired events from /api/analytics/event. Funnel works without identifying users.</p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+          {[
+            { label: "Search submissions", value: searchSubmissions },
+            { label: "Listing views",      value: listingViews },
+            { label: "Contact requests",   value: contactRequests },
+            { label: "View → contact",     value: `${viewToContactPct}%`, sub: `Search → view ${searchToViewPct}%` },
+          ].map(({ label, value, sub }) => (
+            <div key={label} className="rounded-xl border border-border bg-surface-2 p-4">
+              <p className="text-2xl font-semibold font-display">{typeof value === "number" ? value.toLocaleString() : value}</p>
+              <p className="text-xs text-muted mt-0.5">{label}</p>
+              {sub && <p className="text-[10px] text-muted/80 mt-0.5">{sub}</p>}
+            </div>
+          ))}
+        </div>
+
+        <div className="grid gap-6 md:grid-cols-2">
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Top search terms</h3>
+            {topSearches.length === 0 ? (
+              <p className="text-sm text-muted">No search submissions in the last 7 days.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {topSearches.map((s, i) => (
+                  <li key={`${s.q}-${i}`} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate">{s.q}</span>
+                    <span className="text-xs text-muted tabular-nums">{s.count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Event totals</h3>
+            {eventTotals.length === 0 ? (
+              <p className="text-sm text-muted">No analytics events yet — events start landing as soon as users browse.</p>
+            ) : (
+              <ul className="space-y-1.5">
+                {eventTotals.map((e) => (
+                  <li key={e.name} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate">{e.name.replace(/_/g, " ")}</span>
+                    <span className="text-xs text-muted tabular-nums">
+                      {e.total.toLocaleString()} <span className="opacity-60">· {e.sessions} sess.</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* ── PR9 + policy: Listing compliance ── */}
+      <section className="rounded-2xl border border-border bg-surface p-6">
+        <div className="flex items-center justify-between mb-1 gap-3">
+          <h2 className="font-semibold text-sm flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
+            Listing compliance
+          </h2>
+          <span className={`text-[10px] uppercase tracking-widest rounded-full px-2 py-0.5 ${
+            nonCompliant.length === 0
+              ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+              : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+          }`}>
+            {nonCompliant.length === 0 ? "All clear" : `${nonCompliant.length} flagged`}
+          </span>
+        </div>
+        <p className="text-xs text-muted mb-4">
+          Active listings, by status against the publish bar (≥10 photos, 11–20 char VIN).
+          Policy cutoff: <span className="font-mono">{QUALITY_POLICY_CUTOFF}</span> — listings created before this date are grandfathered and remain publicly visible.
+        </p>
+
+        {/* Four-number strip — track migration readiness from Option A → Option B.
+            Total = Compliant + Grandfathered + Hidden (all active rows). */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+          <div className="rounded-xl border border-border bg-surface-2 p-4">
+            <p className="text-2xl font-semibold font-display tabular-nums">
+              {(complianceStats.compliant + complianceStats.grandfathered + complianceStats.hidden).toLocaleString()}
+            </p>
+            <p className="text-xs text-muted mt-0.5">Total active</p>
+            <p className="text-[10px] text-muted/80 mt-0.5">All status=active rows</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-2 p-4">
+            <p className="text-2xl font-semibold font-display tabular-nums">{complianceStats.compliant.toLocaleString()}</p>
+            <p className="text-xs text-muted mt-0.5">Compliant</p>
+            <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5">Visible · meets bar</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-2 p-4">
+            <p className="text-2xl font-semibold font-display tabular-nums">{complianceStats.grandfathered.toLocaleString()}</p>
+            <p className="text-xs text-muted mt-0.5">Grandfathered</p>
+            <p className="text-[10px] text-muted/80 mt-0.5">Pre-cutoff · visible</p>
+          </div>
+          <div className="rounded-xl border border-border bg-surface-2 p-4">
+            <p className="text-2xl font-semibold font-display tabular-nums">{complianceStats.hidden.toLocaleString()}</p>
+            <p className="text-xs text-muted mt-0.5">Hidden non-compliant</p>
+            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">Post-cutoff · failing bar</p>
+          </div>
+        </div>
+
+        {nonCompliant.length === 0 ? (
+          <p className="text-sm text-muted py-4 text-center">
+            Every active listing currently meets the quality requirements.
+          </p>
+        ) : (
+          <div className="rounded-xl border border-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-surface-2">
+                  <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted font-semibold">Listing</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted font-semibold hidden md:table-cell">Dealer</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted font-semibold">Missing</th>
+                  <th className="text-left px-4 py-3 text-xs uppercase tracking-wider text-muted font-semibold hidden sm:table-cell">Last updated</th>
+                  <th className="text-right px-4 py-3 text-xs uppercase tracking-wider text-muted font-semibold">View</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nonCompliant.map((row) => (
+                  <tr key={row.id} className="border-b border-border last:border-0 hover:bg-surface-2 transition-colors">
+                    <td className="px-4 py-3">
+                      <p className="font-medium truncate">{row.year} {row.make} {row.model}</p>
+                      <p className="text-[11px] text-muted font-mono truncate">{row.slug}</p>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell text-muted">{row.dealerName ?? "—"}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-1">
+                        {row.missingPhotos && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 px-2 py-0.5 text-[10px] font-semibold">
+                            <ImageOff className="h-2.5 w-2.5" />
+                            {row.photoCount}/10 photos
+                          </span>
+                        )}
+                        {row.missingVin && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 px-2 py-0.5 text-[10px] font-semibold">
+                            <FileWarning className="h-2.5 w-2.5" />
+                            {row.vinLength === 0 ? "no VIN" : `VIN ${row.vinLength}/11`}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell text-xs text-muted">
+                      {new Date(row.updatedAt).toLocaleDateString("en-KE", { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        href={`/cars/${row.slug}`}
+                        className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+                      >
+                        Open <ExternalLink className="h-3 w-3" />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {/* ── Charts row ── */}
       <div className="grid gap-6 lg:grid-cols-3">
