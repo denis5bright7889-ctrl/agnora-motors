@@ -342,6 +342,13 @@ CREATE INDEX IF NOT EXISTS idx_cars_inspection_available ON cars(inspection_avai
 CREATE INDEX IF NOT EXISTS idx_cars_service_history      ON cars(service_history_available) WHERE service_history_available = TRUE;
 CREATE INDEX IF NOT EXISTS idx_cars_ownership_verified   ON cars(ownership_verified)        WHERE ownership_verified        = TRUE;
 
+-- Optional buyer-decision specs (Phase 1: horsepower, torque, engine cc,
+-- seats, fuel economy; Phase 2: battery + range, payload, towing). Stored as
+-- JSONB so we can extend / specialise by body type without per-field
+-- migrations. Indexed search filters should still be promoted to typed
+-- columns later — this column is for display + flexible-shape data.
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS specifications JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 -- ============================================================
 -- PR8: analytics events
 -- ============================================================

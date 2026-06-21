@@ -283,6 +283,7 @@ export async function createDealerCar(
   if (status === "active") enforcePublishQuality(data.images, data.vin);
 
   const centroid = getCentroid(data.location);
+  const specsJson = JSON.stringify(data.specifications ?? {});
   const rows = await query<DealerCar>(
     `INSERT INTO cars
        (dealer_id, slug, year, make, model, trim, price, mileage, fuel,
@@ -290,8 +291,9 @@ export async function createDealerCar(
         financing_available, hire_purchase_available,
         drivetrain, engine_size_l, previous_owners, exterior_color, interior_color, seller_type,
         latitude, longitude, status,
-        vin, vin_verified, service_history_available, ownership_verified, inspection_available)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+        vin, vin_verified, service_history_available, ownership_verified, inspection_available,
+        specifications)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -305,6 +307,7 @@ export async function createDealerCar(
        exterior_color   AS "exteriorColor",
        interior_color   AS "interiorColor",
        seller_type      AS "sellerType",
+       specifications,
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       dealerId, slug, data.year, data.make, data.model, data.trim ?? null,
@@ -327,6 +330,7 @@ export async function createDealerCar(
       data.serviceHistoryAvailable ?? false,
       data.ownershipVerified       ?? false,
       data.inspectionAvailable     ?? false,
+      specsJson,
     ],
   );
   return rows[0];
@@ -370,6 +374,8 @@ export async function createPublicCar(
   enforcePublishQuality(data.images, data.vin);
 
   const centroid = getCentroid(data.location);
+  // JSONB column expects a string; PG node driver does the parse on the way back.
+  const specsJson = JSON.stringify(data.specifications ?? {});
   const rows = await query<DealerCar>(
     `INSERT INTO cars
        (slug, year, make, model, trim, price, mileage, fuel,
@@ -377,8 +383,9 @@ export async function createPublicCar(
         financing_available, hire_purchase_available, seller_name, seller_phone,
         drivetrain, engine_size_l, previous_owners, exterior_color, interior_color, seller_type,
         latitude, longitude,
-        vin, vin_verified, service_history_available, ownership_verified, inspection_available)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
+        vin, vin_verified, service_history_available, ownership_verified, inspection_available,
+        specifications)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -392,6 +399,7 @@ export async function createPublicCar(
        exterior_color   AS "exteriorColor",
        interior_color   AS "interiorColor",
        seller_type      AS "sellerType",
+       specifications,
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       slug, data.year, data.make, data.model, data.trim ?? null,
@@ -414,6 +422,7 @@ export async function createPublicCar(
       data.serviceHistoryAvailable ?? false,
       data.ownershipVerified       ?? false,
       data.inspectionAvailable     ?? false,
+      specsJson,
     ],
   );
   return rows[0];
@@ -1917,6 +1926,7 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
     drivetrain: string | null; engineSizeL: number | string | null;
     previousOwners: number | null; exteriorColor: string | null;
     interiorColor: string | null; sellerType: string | null;
+    specifications: Record<string, unknown> | null;
     createdAt: string;
     dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
   };
@@ -1936,6 +1946,7 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
             c.exterior_color   AS "exteriorColor",
             c.interior_color   AS "interiorColor",
             c.seller_type      AS "sellerType",
+            c.specifications,
             c.created_at       AS "createdAt",
             COALESCE(d.business_name, c.seller_name) AS "dealerName",
             COALESCE(d.location, c.location)         AS "dealerLocation",
@@ -1973,6 +1984,7 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
     exteriorColor:  r.exteriorColor  ?? undefined,
     interiorColor:  r.interiorColor  ?? undefined,
     sellerType:     (r.sellerType    ?? undefined) as Car["sellerType"],
+    specifications: (r.specifications ?? undefined) as Car["specifications"],
     createdAt: r.createdAt,
     dealer: {
       name:     r.dealerName     ?? "Agnora Dealer",
@@ -2005,6 +2017,7 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
     interiorColor: string | null; sellerType: string | null;
     vin: string | null; vinVerified: boolean;
     serviceHistoryAvailable: boolean; ownershipVerified: boolean; inspectionAvailable: boolean;
+    specifications: Record<string, unknown> | null;
     createdAt: string;
     dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
   };
@@ -2029,6 +2042,7 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
             c.service_history_available   AS "serviceHistoryAvailable",
             c.ownership_verified          AS "ownershipVerified",
             c.inspection_available        AS "inspectionAvailable",
+            c.specifications,
             c.created_at       AS "createdAt",
             COALESCE(d.business_name, c.seller_name) AS "dealerName",
             COALESCE(d.location, c.location)         AS "dealerLocation",
@@ -2077,6 +2091,7 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
     serviceHistoryAvailable: r.serviceHistoryAvailable,
     ownershipVerified:       r.ownershipVerified,
     inspectionAvailable:     r.inspectionAvailable,
+    specifications:          (r.specifications ?? undefined) as Car["specifications"],
     createdAt: r.createdAt,
     dealer: {
       name:     r.dealerName     ?? "Agnora Dealer",

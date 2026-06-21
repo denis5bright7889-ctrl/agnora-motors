@@ -9,7 +9,7 @@ import Link from "next/link";
 import {
   Upload, X, Loader2, CheckCircle2, ArrowLeft, ArrowRight,
   AlertCircle, Star, MapPin, Gauge, Fuel, Settings, Car as CarIcon,
-  Check, Lock, ShieldCheck, Zap,
+  Check, Lock, ShieldCheck, Zap, ChevronDown, Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,9 +32,41 @@ const schema = z.object({
   vin: z.string()
     .min(11, "VIN must be 11–20 characters")
     .max(20, "VIN must be 11–20 characters"),
+  // Optional typed cols already in the cars table — exposed via Technical
+  // specifications panel below.
+  drivetrain:     z.enum(["fwd", "rwd", "awd", "4wd"]).optional().or(z.literal("")),
+  previousOwners: optionalNum(0, 20),
+  exteriorColor:  z.string().max(40).optional(),
+  interiorColor:  z.string().max(40).optional(),
   financingAvailable:    z.boolean().default(false),
   hirePurchaseAvailable: z.boolean().default(false),
+  // Optional buyer-decision specs — every field independently optional.
+  // Conditional UI shows only the relevant ones based on fuel + body type.
+  // Numbers are nullable-on-blank: react-hook-form gives "" for an empty
+  // number input, so coerce to undefined before validation.
+  specifications: z.object({
+    horsepower:         optionalNum(20, 2000),
+    torqueNm:           optionalNum(20, 3000),
+    engineCC:           optionalNum(50, 10_000),
+    fuelEconomyKmL:     optionalNum(1, 60, true),
+    batteryCapacityKwh: optionalNum(1, 500, true),
+    batteryRangeKm:     optionalNum(20, 2000),
+    chargingTimeHours:  optionalNum(0.1, 72, true),
+    seats:              optionalNum(1, 80),
+    payloadKg:          optionalNum(50, 50_000),
+    towingKg:           optionalNum(50, 50_000),
+    upholstery:         z.enum(["cloth", "leather", "leatherette", "alcantara", "other"]).optional().or(z.literal("")),
+  }).default({}),
 });
+
+/** Number field that treats empty string as "not provided". */
+function optionalNum(min: number, max: number, allowFloat = false) {
+  const base = allowFloat ? z.number() : z.number().int();
+  return z.preprocess(
+    (v) => (v === "" || v == null) ? undefined : Number(v),
+    base.min(min).max(max).optional(),
+  );
+}
 
 type FormData = z.infer<typeof schema>;
 
@@ -53,9 +85,9 @@ const STEP_FIELDS: Record<0 | 1 | 2, (keyof FormData)[]> = {
 };
 
 const STEP_META = [
-  { title: "Your car",         subtitle: "What you're selling" },
-  { title: "Photos & price",   subtitle: "Show it off, name your number" },
-  { title: "How buyers reach you", subtitle: "We send messages to you directly" },
+  { title: "Vehicle details", subtitle: "Tell us about the car you're selling" },
+  { title: "Photos & price",  subtitle: "Show it off, name your number" },
+  { title: "Contact details", subtitle: "How interested buyers will reach you" },
 ] as const;
 
 type UploadStatus = "uploading" | "uploaded" | "failed";
@@ -107,6 +139,7 @@ export default function PublicListingPage() {
   const [customFeature, setCustomFeature] = useState("");
   const [saved, setSaved]             = useState(false);
   const [error, setError]             = useState("");
+  const [techOpen, setTechOpen]       = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const uploadedCount  = images.filter((i) => i.status === "uploaded").length;
@@ -274,10 +307,14 @@ export default function PublicListingPage() {
       setStep(1);
       return;
     }
+    // Strip empty-string entries from optional fields so the API's zod schema
+    // doesn't see "" where it expects undefined (drivetrain, upholstery, etc).
+    const clean = stripEmpty(data);
+
     const res = await fetch("/api/cars", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...data, images: imageUrls, features }),
+      body: JSON.stringify({ ...clean, images: imageUrls, features }),
     });
     if (res.ok) {
       try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
@@ -318,27 +355,31 @@ export default function PublicListingPage() {
             Back
           </button>
 
-          <h1 className="font-display text-4xl md:text-6xl lg:text-7xl font-medium leading-[1.02] tracking-tight max-w-3xl">
-            List your car in under{" "}
-            <span className="italic text-accent">four minutes.</span>
+          <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-medium leading-[1.05] tracking-tight max-w-3xl">
+            Sell your car with confidence —{" "}
+            <span className="italic text-accent">reach serious buyers across Kenya.</span>
           </h1>
-          <p className="mt-4 max-w-xl text-base lg:text-lg text-muted leading-relaxed">
-            No account. No password. No spam. Just the details buyers need
-            and how they can reach you.
+          <p className="mt-4 max-w-2xl text-base lg:text-lg text-muted leading-relaxed">
+            Create a trusted listing in minutes. No account required. Upload your
+            photos, verify your VIN, and connect directly with ready-to-buy customers.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted">
             <span className="inline-flex items-center gap-1.5">
               <ShieldCheck className="h-3.5 w-3.5 text-accent" />
-              Free forever
+              Free to list
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Lock className="h-3.5 w-3.5 text-accent" />
-              VIN-verified listings only
+              VIN-verified listings
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <CheckCircle2 className="h-3.5 w-3.5 text-accent" />
+              Direct buyer enquiries
             </span>
             <span className="inline-flex items-center gap-1.5">
               <Zap className="h-3.5 w-3.5 text-accent" />
-              Live preview as you type
+              Live preview as you build
             </span>
           </div>
         </div>
@@ -360,15 +401,15 @@ export default function PublicListingPage() {
             )}
 
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-              {/* Step heading — same hierarchy for each step */}
+              {/* Step heading — combined step counter + section title in one
+                  accent label, then a richer descriptive subtitle below. */}
               <div>
                 <p className="text-xs font-semibold uppercase tracking-widest text-accent mb-2">
-                  Step {step + 1} of 3
+                  Step {step + 1} of 3 — {STEP_META[step].title}
                 </p>
-                <h2 className="font-display text-3xl md:text-4xl font-medium tracking-tight">
-                  {STEP_META[step].title}
-                </h2>
-                <p className="mt-1 text-sm text-muted">{STEP_META[step].subtitle}</p>
+                <p className="font-display text-2xl md:text-3xl font-medium tracking-tight text-foreground">
+                  {STEP_META[step].subtitle}
+                </p>
               </div>
 
               {/* ── Step 0: Car details ── */}
@@ -414,7 +455,8 @@ export default function PublicListingPage() {
                       className={cn(inputCls(!!errors.vin), "uppercase tracking-wider")}
                     />
                     <p className="mt-1.5 text-xs text-muted leading-relaxed">
-                      Look on the logbook, lower windshield, driver's door frame, or insurance documents. 11–20 characters.
+                      Find your VIN on the logbook, lower windshield, driver's door
+                      frame, or insurance documents.
                     </p>
                   </Field>
                 </Card>
@@ -462,6 +504,225 @@ export default function PublicListingPage() {
                     />
                   </Field>
                 </Card>
+
+                {/* ── Technical specifications (optional, collapsed by default) ── */}
+                {/* Adds more detail to help buyers compare. Conditional fields show
+                    only when the fuel type or body type makes them relevant. */}
+                <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setTechOpen((o) => !o)}
+                    aria-expanded={techOpen ? "true" : "false"}
+                    className="w-full flex items-start justify-between gap-3 text-left p-5 sm:p-6 hover:bg-surface-2/40 transition-colors"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
+                        <Plus className={cn("h-4 w-4 transition-transform", techOpen && "rotate-45")} />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-base">
+                          Technical specifications <span className="text-muted font-normal">(optional)</span>
+                        </h3>
+                        <p className="text-xs text-muted mt-0.5 leading-relaxed">
+                          Add more details to help buyers compare vehicles.
+                        </p>
+                      </div>
+                    </div>
+                    <ChevronDown
+                      className={cn("h-5 w-5 text-muted transition-transform shrink-0 mt-1.5", techOpen && "rotate-180")}
+                      aria-hidden
+                    />
+                  </button>
+
+                  {techOpen && (
+                    <div className="px-5 sm:px-6 pb-6 space-y-6 border-t border-border pt-6">
+                      {/* Engine */}
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">Engine</p>
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          {watched.fuel !== "electric" && (
+                            <Field label="Engine capacity (cc)">
+                              <input
+                                {...register("specifications.engineCC")}
+                                type="number"
+                                placeholder="2000"
+                                className={inputCls(false)}
+                              />
+                            </Field>
+                          )}
+                          <Field
+                            label="Horsepower (hp)"
+                            hint="Higher horsepower generally means quicker acceleration."
+                          >
+                            <input
+                              {...register("specifications.horsepower")}
+                              type="number"
+                              placeholder="170"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                          <Field
+                            label="Torque (Nm)"
+                            hint="Higher torque improves towing and low-speed pull."
+                          >
+                            <input
+                              {...register("specifications.torqueNm")}
+                              type="number"
+                              placeholder="250"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2 mt-4">
+                          <Field label="Drivetrain">
+                            <select
+                              {...register("drivetrain")}
+                              className={selectCls(false)}
+                            >
+                              <option value="">Select drivetrain</option>
+                              <option value="fwd">Front-wheel drive (FWD)</option>
+                              <option value="rwd">Rear-wheel drive (RWD)</option>
+                              <option value="awd">All-wheel drive (AWD)</option>
+                              <option value="4wd">4-wheel drive (4WD)</option>
+                            </select>
+                          </Field>
+                          {watched.fuel !== "electric" && (
+                            <Field
+                              label="Fuel economy (km/L)"
+                              hint="Combined urban + highway is fine — round to one decimal."
+                            >
+                              <input
+                                {...register("specifications.fuelEconomyKmL")}
+                                type="number"
+                                step="0.1"
+                                placeholder="14.2"
+                                className={inputCls(false)}
+                              />
+                            </Field>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Conditional: EV / Hybrid */}
+                      {(watched.fuel === "electric" || watched.fuel === "hybrid") && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">
+                            {watched.fuel === "electric" ? "Battery & range" : "Hybrid battery"}
+                          </p>
+                          <div className="grid gap-4 sm:grid-cols-3">
+                            <Field label="Battery capacity (kWh)">
+                              <input
+                                {...register("specifications.batteryCapacityKwh")}
+                                type="number"
+                                step="0.1"
+                                placeholder="75"
+                                className={inputCls(false)}
+                              />
+                            </Field>
+                            <Field label={watched.fuel === "electric" ? "Range (km)" : "EV-only range (km)"}>
+                              <input
+                                {...register("specifications.batteryRangeKm")}
+                                type="number"
+                                placeholder="450"
+                                className={inputCls(false)}
+                              />
+                            </Field>
+                            {watched.fuel === "electric" && (
+                              <Field label="Charging time (hrs, AC)">
+                                <input
+                                  {...register("specifications.chargingTimeHours")}
+                                  type="number"
+                                  step="0.1"
+                                  placeholder="8"
+                                  className={inputCls(false)}
+                                />
+                              </Field>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Conditional: Pickup capacity */}
+                      {watched.bodyType === "pickup" && (
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">Load capacity</p>
+                          <div className="grid gap-4 sm:grid-cols-2">
+                            <Field label="Payload (kg)">
+                              <input
+                                {...register("specifications.payloadKg")}
+                                type="number"
+                                placeholder="1000"
+                                className={inputCls(false)}
+                              />
+                            </Field>
+                            <Field label="Towing capacity (kg)">
+                              <input
+                                {...register("specifications.towingKg")}
+                                type="number"
+                                placeholder="3500"
+                                className={inputCls(false)}
+                              />
+                            </Field>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Interior & exterior */}
+                      <div>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">Interior & exterior</p>
+                        <div className="grid gap-4 sm:grid-cols-3">
+                          <Field label="Seats">
+                            <input
+                              {...register("specifications.seats")}
+                              type="number"
+                              placeholder="5"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                          <Field label="Exterior colour">
+                            <input
+                              {...register("exteriorColor")}
+                              type="text"
+                              placeholder="Pearl White"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                          <Field label="Interior colour">
+                            <input
+                              {...register("interiorColor")}
+                              type="text"
+                              placeholder="Black leather"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                        </div>
+                        <div className="grid gap-4 sm:grid-cols-2 mt-4">
+                          <Field label="Upholstery">
+                            <select
+                              {...register("specifications.upholstery")}
+                              className={selectCls(false)}
+                            >
+                              <option value="">Select material</option>
+                              <option value="cloth">Cloth</option>
+                              <option value="leather">Leather</option>
+                              <option value="leatherette">Leatherette</option>
+                              <option value="alcantara">Alcantara</option>
+                              <option value="other">Other</option>
+                            </select>
+                          </Field>
+                          <Field label="Previous owners">
+                            <input
+                              {...register("previousOwners")}
+                              type="number"
+                              placeholder="1"
+                              className={inputCls(false)}
+                            />
+                          </Field>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* ── Step 1: Photos & price ── */}
@@ -753,6 +1014,12 @@ export default function PublicListingPage() {
                   </button>
                 )}
               </div>
+
+              {/* Footer reassurance */}
+              <p className="text-xs text-muted text-center leading-relaxed pt-2">
+                Your contact details are only shared with interested buyers
+                after you publish your listing.
+              </p>
             </form>
           </div>
 
@@ -764,7 +1031,8 @@ export default function PublicListingPage() {
               </p>
               <LivePreview values={watched as Partial<FormData>} images={images} features={features} />
               <p className="text-xs text-muted leading-relaxed mt-3">
-                Updates as you type. Photos appear here the moment they upload.
+                Your listing updates instantly as you type. Add photos to see
+                exactly what buyers will see.
               </p>
             </div>
           </aside>
@@ -852,9 +1120,11 @@ function LivePreview({
             </span>
           </>
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-muted">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-4 text-center text-muted">
             <CarIcon className="h-10 w-10 opacity-50" />
-            <span className="text-xs">Add photos to preview</span>
+            <span className="text-xs leading-relaxed">
+              Your vehicle preview will appear here as you complete the form.
+            </span>
           </div>
         )}
       </div>
@@ -915,10 +1185,11 @@ function Card({ children }: { children: React.ReactNode }) {
 }
 
 function Field({
-  label, error, children,
+  label, error, hint, children,
 }: {
   label: string;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -928,6 +1199,9 @@ function Field({
       </label>
       {children}
       {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
+      {hint && !error && (
+        <p className="mt-1 text-[11px] text-muted/80 leading-relaxed">{hint}</p>
+      )}
     </div>
   );
 }
@@ -952,4 +1226,26 @@ function selectCls(hasError: boolean) {
 }
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Recursively drop `""` and nullish leaves from an object so optional zod
+ * fields on the server see `undefined` (and stay optional) instead of `""`
+ * (which would fail their string/enum validators). Arrays + non-empty
+ * strings + non-zero numbers + booleans are preserved as-is.
+ */
+function stripEmpty<T>(input: T): T {
+  if (Array.isArray(input)) return input;
+  if (input === null || typeof input !== "object") return input;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input as Record<string, unknown>)) {
+    if (v === "" || v === null || v === undefined) continue;
+    if (typeof v === "object" && !Array.isArray(v)) {
+      const sub = stripEmpty(v) as Record<string, unknown>;
+      if (Object.keys(sub).length > 0) out[k] = sub;
+    } else {
+      out[k] = v;
+    }
+  }
+  return out as T;
 }

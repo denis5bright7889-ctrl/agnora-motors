@@ -9,6 +9,32 @@ export type PlanId = "free" | "pro" | "premium";
 export type Drivetrain = "fwd" | "rwd" | "awd" | "4wd";
 export type SellerType = "dealer" | "private" | "login_free";
 export type PriceTier  = "great" | "fair" | "above";
+export type Upholstery = "cloth" | "leather" | "leatherette" | "alcantara" | "other";
+
+/**
+ * Optional buyer-decision specs. JSONB-backed so we can extend without DB
+ * migrations. Keep this list intentional — every field here is one a buyer
+ * actually uses to compare cars. Indexable filters should be promoted to
+ * dedicated columns once we start filtering by them in /cars search.
+ */
+export interface Specifications {
+  // Engine + drivetrain
+  horsepower?:        number;   // hp
+  torqueNm?:          number;
+  engineCC?:          number;   // alt to engine_size_l; preferred unit
+  // Efficiency
+  fuelEconomyKmL?:    number;   // hide for fuel=electric
+  // EV / hybrid
+  batteryCapacityKwh?: number;
+  batteryRangeKm?:    number;
+  chargingTimeHours?: number;
+  // Capacity (body-type-dependent)
+  seats?:             number;
+  payloadKg?:         number;   // pickup
+  towingKg?:          number;   // pickup
+  // Interior
+  upholstery?:        Upholstery;
+}
 
 export interface Car {
   id: string;
@@ -48,6 +74,9 @@ export interface Car {
   marketAvg?: number;            // KSh average of comparable listed cars
   marketSampleCount?: number;    // how many comparables fed the average
   priceTier?: PriceTier;         // "great" | "fair" | "above"
+  // Flexible per-listing specs (horsepower, torque, battery, seats…).
+  // See Specifications above for the shape.
+  specifications?: Specifications;
   dealer: {
     name: string;
     rating: number;
@@ -154,6 +183,8 @@ export interface DealerCar {
   serviceHistoryAvailable?: boolean | null;
   ownershipVerified?: boolean | null;
   inspectionAvailable?: boolean | null;
+  // Buyer-decision specs, JSONB on the cars table. See Specifications type.
+  specifications?: Specifications | null;
   status: CarStatus;
   createdAt: string;
   updatedAt: string;

@@ -117,6 +117,21 @@ const createSchema = z.object({
   serviceHistoryAvailable: z.boolean().optional(),
   ownershipVerified:       z.boolean().optional(),
   inspectionAvailable:     z.boolean().optional(),
+  // Optional buyer-decision specs (JSONB-backed). Each field is independently
+  // optional; conditional UI controls which ones the seller actually fills in.
+  specifications: z.object({
+    horsepower:         z.coerce.number().int().min(20).max(2000).optional(),
+    torqueNm:           z.coerce.number().int().min(20).max(3000).optional(),
+    engineCC:           z.coerce.number().int().min(50).max(10000).optional(),
+    fuelEconomyKmL:     z.coerce.number().min(1).max(60).optional(),
+    batteryCapacityKwh: z.coerce.number().min(1).max(500).optional(),
+    batteryRangeKm:     z.coerce.number().int().min(20).max(2000).optional(),
+    chargingTimeHours:  z.coerce.number().min(0.1).max(72).optional(),
+    seats:              z.coerce.number().int().min(1).max(80).optional(),
+    payloadKg:          z.coerce.number().int().min(50).max(50_000).optional(),
+    towingKg:           z.coerce.number().int().min(50).max(50_000).optional(),
+    upholstery:         z.enum(["cloth", "leather", "leatherette", "alcantara", "other"]).optional(),
+  }).optional(),
 });
 
 export async function POST(req: Request) {

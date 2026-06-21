@@ -248,25 +248,7 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
                   )}
 
                   {tab === "specs" && (
-                    <div className="rounded-2xl border border-border overflow-hidden">
-                      {[
-                        ["Make", car!.make],
-                        ["Model", car!.model],
-                        ["Trim", car!.trim ?? "—"],
-                        ["Year", String(car!.year)],
-                        ["Body type", car!.bodyType],
-                        ["Fuel type", fuelLabel],
-                        ["Transmission", car!.transmission === "auto" ? "Automatic" : "Manual"],
-                        ["Mileage", formatMileage(car!.mileage)],
-                        ["Condition", conditionText],
-                        ["Location", car!.location],
-                      ].map(([label, value], i) => (
-                        <div key={label} className={cn("grid grid-cols-2 px-4 py-3 text-sm", i % 2 === 0 ? "bg-surface" : "bg-surface/50")}>
-                          <span className="text-muted">{label}</span>
-                          <span className="font-medium capitalize">{value}</span>
-                        </div>
-                      ))}
-                    </div>
+                    <SpecsTable car={car!} fuelLabel={fuelLabel} conditionText={conditionText} />
                   )}
 
                   {tab === "inspection" && car!.inspection && (
@@ -467,6 +449,118 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
         }}
       />
     </>
+  );
+}
+
+// Buyer-facing specifications panel. Groups always-present fields with the
+// optional Specifications JSONB the seller may have filled in. Empty values
+// are skipped so we never show "—" rows that look like a half-broken form.
+function SpecsTable({
+  car, fuelLabel, conditionText,
+}: {
+  car: CarType;
+  fuelLabel: string;
+  conditionText: string;
+}) {
+  const s = car.specifications ?? {};
+  const drivetrainLabel: Record<NonNullable<CarType["drivetrain"]>, string> = {
+    fwd: "Front-wheel drive (FWD)",
+    rwd: "Rear-wheel drive (RWD)",
+    awd: "All-wheel drive (AWD)",
+    "4wd": "4-wheel drive (4WD)",
+  };
+  const upholsteryLabel: Record<string, string> = {
+    cloth: "Cloth", leather: "Leather", leatherette: "Leatherette",
+    alcantara: "Alcantara", other: "Other",
+  };
+
+  const groups: { title: string; rows: [string, string | undefined][] }[] = [
+    {
+      title: "Identity",
+      rows: [
+        ["Make",       car.make],
+        ["Model",      car.model],
+        ["Trim",       car.trim],
+        ["Year",       String(car.year)],
+        ["Body type",  car.bodyType],
+        ["Condition",  conditionText],
+        ["Location",   car.location],
+      ],
+    },
+    {
+      title: "Engine & drivetrain",
+      rows: [
+        ["Fuel type",        fuelLabel],
+        ["Transmission",     car.transmission === "auto" ? "Automatic" : "Manual"],
+        ["Drivetrain",       car.drivetrain ? drivetrainLabel[car.drivetrain] : undefined],
+        ["Engine capacity",  s.engineCC ? `${s.engineCC.toLocaleString()} cc` : (car.engineSizeL ? `${car.engineSizeL} L` : undefined)],
+        ["Horsepower",       s.horsepower ? `${s.horsepower} hp` : undefined],
+        ["Torque",           s.torqueNm ? `${s.torqueNm} Nm` : undefined],
+        ["Fuel economy",     s.fuelEconomyKmL ? `${s.fuelEconomyKmL} km/L` : undefined],
+        ["Mileage",          formatMileage(car.mileage)],
+      ],
+    },
+    {
+      title: "Battery & range",
+      rows: [
+        ["Battery capacity", s.batteryCapacityKwh ? `${s.batteryCapacityKwh} kWh` : undefined],
+        ["Range",            s.batteryRangeKm ? `${s.batteryRangeKm.toLocaleString()} km` : undefined],
+        ["Charging time",    s.chargingTimeHours ? `${s.chargingTimeHours} hrs` : undefined],
+      ],
+    },
+    {
+      title: "Capacity",
+      rows: [
+        ["Seats",            s.seats ? String(s.seats) : undefined],
+        ["Payload",          s.payloadKg ? `${s.payloadKg.toLocaleString()} kg` : undefined],
+        ["Towing capacity",  s.towingKg ? `${s.towingKg.toLocaleString()} kg` : undefined],
+      ],
+    },
+    {
+      title: "Interior & exterior",
+      rows: [
+        ["Exterior colour", car.exteriorColor],
+        ["Interior colour", car.interiorColor],
+        ["Upholstery",      s.upholstery ? upholsteryLabel[s.upholstery] : undefined],
+      ],
+    },
+    {
+      title: "Ownership",
+      rows: [
+        ["Previous owners", car.previousOwners != null ? String(car.previousOwners) : undefined],
+        ["VIN verified",    car.vinVerified ? "Yes" : undefined],
+      ],
+    },
+  ];
+
+  return (
+    <div className="space-y-5">
+      {groups.map((g) => {
+        const filled = g.rows.filter(([, v]) => v != null && v !== "");
+        if (filled.length === 0) return null;
+        return (
+          <div key={g.title}>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-2">
+              {g.title}
+            </p>
+            <div className="rounded-2xl border border-border overflow-hidden">
+              {filled.map(([label, value], i) => (
+                <div
+                  key={label}
+                  className={cn(
+                    "grid grid-cols-2 px-4 py-3 text-sm",
+                    i % 2 === 0 ? "bg-surface" : "bg-surface/50",
+                  )}
+                >
+                  <span className="text-muted">{label}</span>
+                  <span className="font-medium capitalize">{value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

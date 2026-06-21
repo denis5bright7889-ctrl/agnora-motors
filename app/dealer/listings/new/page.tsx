@@ -6,7 +6,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Upload, X, Loader2, CheckCircle2, ArrowLeft } from "lucide-react";
-import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 const schema = z.object({
@@ -177,10 +176,19 @@ export default function NewListingPage() {
 
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
             {images.map((url, i) => (
-              <div key={url} className="relative aspect-[4/3] rounded-xl overflow-hidden group">
-                <Image src={url} alt={`Photo ${i + 1}`} fill sizes="150px" className="object-cover" />
+              <div key={url} className="relative aspect-[4/3] rounded-xl overflow-hidden group bg-surface-2">
+                {/* Plain <img>: previews must work for any upload URL without
+                    depending on next.config remotePatterns. Same fix we applied
+                    to /sell/new. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={url}
+                  alt={`Photo ${i + 1}`}
+                  loading="lazy"
+                  className="absolute inset-0 h-full w-full object-cover"
+                />
                 {i === 0 && (
-                  <span className="absolute left-1.5 top-1.5 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold text-white">
+                  <span className="absolute left-1.5 top-1.5 z-10 rounded-full bg-accent px-1.5 py-0.5 text-[9px] font-bold text-white">
                     Cover
                   </span>
                 )}
@@ -188,7 +196,7 @@ export default function NewListingPage() {
                   type="button"
                   aria-label={`Remove photo ${i + 1}`}
                   onClick={() => setImages((p) => p.filter((u) => u !== url))}
-                  className="absolute right-1.5 top-1.5 h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white hidden group-hover:flex"
+                  className="absolute right-1.5 top-1.5 z-10 h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white hidden group-hover:flex"
                 >
                   <X className="h-3 w-3" />
                 </button>

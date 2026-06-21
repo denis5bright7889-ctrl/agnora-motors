@@ -45,26 +45,29 @@ async function registerBuyer(data: Input) {
   const passwordHash = await bcrypt.hash(data.password, 12);
   const user = await createUser({ email: data.email, name: data.name, passwordHash, role: "buyer" });
 
-  const code = String(Math.floor(100000 + Math.random() * 900000));
-  await setVerificationCode(data.email, code);
-  console.log("[register] OTP saved for email=%s", data.email);
+  // Auto-verify the email so credentials login works immediately — matches
+  // the existing dealer-registration behaviour. Auth.js's CredentialsProvider
+  // can't return a custom "email not verified" reason to the client, so an
+  // unverified user just sees a generic "Invalid email/password" and is
+  // locked out. Until the email pipeline is reliable enough to gate sign-in
+  // on verification, the friction isn't worth the security gain.
+  await markUserEmailVerified(user.id);
 
+  // Best-effort welcome email (with an OTP they don't actually need). If it
+  // fails we still return success — the account is already usable.
   try {
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    await setVerificationCode(data.email, code);
     await sendVerificationEmail(data.email, data.name, code);
   } catch (emailErr) {
-    console.error("[register] email delivery failed for email=%s:", data.email, emailErr);
-    return NextResponse.json(
-      { user: { id: user.id, email: user.email }, verificationSent: false, verified: false,
-        error: "Account created but verification email could not be sent. Please use 'Resend code' on the next page." },
-      { status: 201 },
-    );
+    console.warn("[register] welcome email failed for %s (non-blocking): %s",
+      data.email, emailErr instanceof Error ? emailErr.message : String(emailErr));
   }
 
-  // Notify real-time stream — non-blocking, never fails the registration
   publishEvent("user_registered", { email: data.email, role: "buyer" }).catch(() => {});
 
   return NextResponse.json(
-    { user: { id: user.id, email: user.email }, verificationSent: true, verified: false },
+    { user: { id: user.id, email: user.email }, verified: true },
     { status: 201 },
   );
 }
