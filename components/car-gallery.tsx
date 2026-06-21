@@ -1,9 +1,14 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Image from "next/image";
 import { ChevronLeft, ChevronRight, X, ZoomIn } from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// Plain <img> throughout — next/image is more restrictive than a vanilla
+// browser fetch (it requires the image host in next.config remotePatterns)
+// and a missing whitelist shows up as the broken-image / file icon. Since
+// the gallery accepts arbitrary upload URLs from anywhere (Cloudinary today,
+// other CDNs later), the safest default is to skip next/image entirely.
 
 interface Props {
   images: string[];
@@ -46,13 +51,11 @@ export function CarGallery({ images, alt }: Props) {
         className="group relative aspect-[16/9] overflow-hidden rounded-2xl bg-surface-2 cursor-zoom-in"
         onClick={() => setLightbox(true)}
       >
-        <Image
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
           src={images[selected]}
           alt={`${alt} — photo ${selected + 1}`}
-          fill
-          sizes="(min-width: 1024px) 60vw, 100vw"
-          priority
-          className="object-cover transition-transform duration-500"
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-500"
         />
         <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-xs text-white backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
           <ZoomIn className="h-3 w-3" />
@@ -90,12 +93,12 @@ export function CarGallery({ images, alt }: Props) {
                 i === selected ? "border-accent" : "border-transparent opacity-60 hover:opacity-100",
               )}
             >
-              <Image
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src={img}
                 alt={`${alt} thumbnail ${i + 1}`}
-                fill
-                sizes="80px"
-                className="object-cover"
+                loading="lazy"
+                className="absolute inset-0 h-full w-full object-cover"
               />
             </button>
           ))}
@@ -120,11 +123,10 @@ export function CarGallery({ images, alt }: Props) {
             className="relative max-h-[85vh] max-w-5xl w-full mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            <Image
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={images[selected]}
               alt={`${alt} — photo ${selected + 1}`}
-              width={1200}
-              height={800}
               className="object-contain max-h-[85vh] w-full rounded-xl"
             />
           </div>

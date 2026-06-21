@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { Heart, Shield, Gauge, Fuel, MapPin, Settings2, Banknote } from "lucide-react";
 import type { Car } from "@/types";
@@ -39,13 +38,16 @@ export function CarCard({ car, priority, className }: Props) {
     <article className={cn("group relative hover-lift", className)}>
       <Link href={`/cars/${car.slug}`} className="block focus-visible:outline-none" onClick={handleCardClick}>
         <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface-2">
-          <Image
+          {/* Plain <img>: same defensive choice as the form / gallery so a
+              missing remotePatterns entry can't break listing cards.
+              `priority` becomes fetchpriority="high" for the LCP card. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src={car.images[0] ?? "/placeholder-car.jpg"}
             alt={`${car.year} ${car.make} ${car.model}`}
-            fill
-            sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
-            priority={priority}
-            className="object-cover transition-transform duration-700 group-hover:scale-105"
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "high" : "auto"}
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
           />
           {car.verified && (
             <div className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-900 backdrop-blur">
