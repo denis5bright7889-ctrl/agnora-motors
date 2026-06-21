@@ -651,6 +651,14 @@ export async function updateDealerCar(
     }
   }
 
+  // specifications is JSONB — serialise + cast separately. Treat undefined
+  // as "no change" (so partial updates don't blow the existing object away)
+  // and {} as "explicit reset". Matches createDealerCar's contract.
+  if ("specifications" in data && data.specifications !== undefined) {
+    sets.push(`specifications = $${i++}::jsonb`);
+    vals.push(JSON.stringify(data.specifications));
+  }
+
   if (sets.length === 0) return;
   sets.push("updated_at = NOW()");
   vals.push(id, dealerId);
@@ -1984,7 +1992,12 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
     exteriorColor:  r.exteriorColor  ?? undefined,
     interiorColor:  r.interiorColor  ?? undefined,
     sellerType:     (r.sellerType    ?? undefined) as Car["sellerType"],
-    specifications: (r.specifications ?? undefined) as Car["specifications"],
+    specifications: mergeSpecifications(r.specifications, {
+      drivetrain:     r.drivetrain,
+      exteriorColor:  r.exteriorColor,
+      interiorColor:  r.interiorColor,
+      previousOwners: r.previousOwners,
+    }),
     createdAt: r.createdAt,
     dealer: {
       name:     r.dealerName     ?? "Agnora Dealer",
@@ -1994,6 +2007,33 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
       phone:    r.dealerPhone    ?? "",
     },
   }));
+}
+
+// Buyer-facing read merges typed columns (drivetrain, exteriorColor,
+// interiorColor, previousOwners) into the JSONB specifications object so
+// consumers see ONE unified Specifications shape regardless of where each
+// value is physically stored. Stripping undefined leaves keeps the object
+// compact + predictable.
+function mergeSpecifications(
+  jsonb: Record<string, unknown> | null | undefined,
+  typed: {
+    drivetrain:     string | null;
+    exteriorColor:  string | null;
+    interiorColor:  string | null;
+    previousOwners: number | null;
+  },
+): Car["specifications"] {
+  const merged: Record<string, unknown> = {
+    ...(jsonb ?? {}),
+    drivetrain:     typed.drivetrain     ?? (jsonb as Record<string, unknown> | null)?.drivetrain,
+    exteriorColor:  typed.exteriorColor  ?? (jsonb as Record<string, unknown> | null)?.exteriorColor,
+    interiorColor:  typed.interiorColor  ?? (jsonb as Record<string, unknown> | null)?.interiorColor,
+    previousOwners: typed.previousOwners ?? (jsonb as Record<string, unknown> | null)?.previousOwners,
+  };
+  const clean = Object.fromEntries(
+    Object.entries(merged).filter(([, v]) => v != null && v !== ""),
+  );
+  return Object.keys(clean).length > 0 ? (clean as Car["specifications"]) : undefined;
 }
 
 // ── Public detail lookup ────────────────────────────────────────────────────
@@ -2091,7 +2131,12 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
     serviceHistoryAvailable: r.serviceHistoryAvailable,
     ownershipVerified:       r.ownershipVerified,
     inspectionAvailable:     r.inspectionAvailable,
-    specifications:          (r.specifications ?? undefined) as Car["specifications"],
+    specifications:          mergeSpecifications(r.specifications, {
+      drivetrain:     r.drivetrain,
+      exteriorColor:  r.exteriorColor,
+      interiorColor:  r.interiorColor,
+      previousOwners: r.previousOwners,
+    }),
     createdAt: r.createdAt,
     dealer: {
       name:     r.dealerName     ?? "Agnora Dealer",

@@ -8,7 +8,11 @@ export type AnalyticsEvent =
   | "search_submitted"
   // Listing funnel (PR8)
   | "listing_viewed"
-  | "contact_request_created";
+  | "contact_request_created"
+  // Seller funnel — usage of the optional Technical specifications panel.
+  // Fired on POST success when the seller filled at least one spec field.
+  // Props: { filledFields: number, fuelType: string, bodyType: string }.
+  | "listing_specifications_completed";
 
 const SESSION_KEY = "agnora_session_id";
 

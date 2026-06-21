@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createPublicCar, getCarsByIds, getPublicCars, isDbConfigured, ListingQualityError } from "@/lib/db";
 import { publishEvent } from "@/lib/realtime";
 import { cars as STATIC_CARS } from "@/data/cars";
-import type { Car } from "@/types";
+import type { Car, Specifications } from "@/types";
 
 export const runtime = "nodejs";
 
@@ -117,22 +117,89 @@ const createSchema = z.object({
   serviceHistoryAvailable: z.boolean().optional(),
   ownershipVerified:       z.boolean().optional(),
   inspectionAvailable:     z.boolean().optional(),
-  // Optional buyer-decision specs (JSONB-backed). Each field is independently
-  // optional; conditional UI controls which ones the seller actually fills in.
+  // Canonical Specifications shape (lib/types). Every numeric field is
+  // independently optional + range-clamped here, so the JSONB can never
+  // grow weird strings or out-of-range numbers from a malformed client.
   specifications: z.object({
-    horsepower:         z.coerce.number().int().min(20).max(2000).optional(),
-    torqueNm:           z.coerce.number().int().min(20).max(3000).optional(),
-    engineCC:           z.coerce.number().int().min(50).max(10000).optional(),
-    fuelEconomyKmL:     z.coerce.number().min(1).max(60).optional(),
+    engineCc:           z.coerce.number().int().min(50).max(20_000).optional(),
+    horsepower:         z.coerce.number().int().min(20).max(2_500).optional(),
+    torqueNm:           z.coerce.number().int().min(20).max(5_000).optional(),
+    // Pre-lowercase so external clients sending "AWD" / "4WD" still parse;
+    // normalizeSpecifications() runs after this for the rest of the cleanup.
+    drivetrain:         z.preprocess(
+      (v) => typeof v === "string" ? v.toLowerCase() : v,
+      z.enum(["fwd","rwd","awd","4wd"]).optional(),
+    ),
+    fuelEconomyKmL:     z.coerce.number().min(1).max(100).optional(),
     batteryCapacityKwh: z.coerce.number().min(1).max(500).optional(),
-    batteryRangeKm:     z.coerce.number().int().min(20).max(2000).optional(),
+    rangeKm:            z.coerce.number().int().min(20).max(2_000).optional(),
     chargingTimeHours:  z.coerce.number().min(0.1).max(72).optional(),
-    seats:              z.coerce.number().int().min(1).max(80).optional(),
+    seats:              z.coerce.number().int().min(1).max(60).optional(),
     payloadKg:          z.coerce.number().int().min(50).max(50_000).optional(),
-    towingKg:           z.coerce.number().int().min(50).max(50_000).optional(),
-    upholstery:         z.enum(["cloth", "leather", "leatherette", "alcantara", "other"]).optional(),
+    towingCapacityKg:   z.coerce.number().int().min(50).max(50_000).optional(),
+    exteriorColor:      z.string().max(40).optional(),
+    interiorColor:      z.string().max(40).optional(),
+    upholstery:         z.enum(["cloth","leather","leatherette","alcantara"]).optional(),
+    previousOwners:     z.coerce.number().int().min(0).max(20).optional(),
   }).optional(),
 });
+
+/**
+ * Belt-and-braces normaliser. Zod already clamps and whitelists; this drops
+ * "" leaves, trims strings, lowercases the drivetrain enum, stamps
+ * source="manual", and refuses any unknown key. Any future ingestion path
+ * (VIN decoder, dealer import) routes its writes through this too.
+ */
+function normalizeSpecifications(
+  s: z.infer<typeof createSchema>["specifications"] | undefined,
+  topLevel: { drivetrain?: string; exteriorColor?: string; interiorColor?: string; previousOwners?: number },
+) {
+  // Merge any redundant top-level fields the form might still send so the
+  // canonical place for these is always inside specifications.
+  const merged = {
+    ...(s ?? {}),
+    drivetrain:     s?.drivetrain     ?? (topLevel.drivetrain     as Specifications["drivetrain"] | undefined),
+    exteriorColor:  s?.exteriorColor  ?? topLevel.exteriorColor,
+    interiorColor:  s?.interiorColor  ?? topLevel.interiorColor,
+    previousOwners: s?.previousOwners ?? topLevel.previousOwners,
+  };
+
+  const num = (v: unknown, min: number, max: number): number | undefined =>
+    typeof v === "number" && Number.isFinite(v) && v >= min && v <= max ? v : undefined;
+  const str = (v: unknown, max: number): string | undefined => {
+    if (typeof v !== "string") return undefined;
+    const t = v.trim();
+    return t.length === 0 || t.length > max ? undefined : t;
+  };
+
+  const out: Specifications = {
+    engineCc:           num(merged.engineCc,           50, 20_000),
+    horsepower:         num(merged.horsepower,         20, 2_500),
+    torqueNm:           num(merged.torqueNm,           20, 5_000),
+    drivetrain:         typeof merged.drivetrain === "string"
+      ? (["fwd","rwd","awd","4wd"].includes(merged.drivetrain.toLowerCase())
+          ? merged.drivetrain.toLowerCase() as Specifications["drivetrain"]
+          : undefined)
+      : undefined,
+    fuelEconomyKmL:     num(merged.fuelEconomyKmL,     1, 100),
+    batteryCapacityKwh: num(merged.batteryCapacityKwh, 1, 500),
+    rangeKm:            num(merged.rangeKm,            20, 2_000),
+    chargingTimeHours:  num(merged.chargingTimeHours,  0.1, 72),
+    seats:              num(merged.seats,              1, 60),
+    payloadKg:          num(merged.payloadKg,          50, 50_000),
+    towingCapacityKg:   num(merged.towingCapacityKg,   50, 50_000),
+    exteriorColor:      str(merged.exteriorColor,      40),
+    interiorColor:      str(merged.interiorColor,      40),
+    upholstery:         ["cloth","leather","leatherette","alcantara"].includes(merged.upholstery as string)
+      ? merged.upholstery as Specifications["upholstery"]
+      : undefined,
+    previousOwners:     num(merged.previousOwners,     0, 20),
+    source:             "manual",
+  };
+
+  // Strip undefined leaves so the JSONB stays compact and predictable.
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as Specifications;
+}
 
 export async function POST(req: Request) {
   if (!isDbConfigured()) {
@@ -148,8 +215,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 
+  // Normalise specs server-side: lowercase enums, trim strings, drop empty
+  // leaves, clamp ranges, whitelist keys, stamp source. Even though zod
+  // already validates the inbound shape, this also collapses redundant
+  // top-level drivetrain/colors/owners fields into the specifications
+  // object so storage is consistent.
+  const normalisedSpecs = normalizeSpecifications(data.specifications, {
+    drivetrain:     data.drivetrain,
+    exteriorColor:  data.exteriorColor,
+    interiorColor:  data.interiorColor,
+    previousOwners: data.previousOwners,
+  });
+
   try {
-    const car = await createPublicCar(data);
+    const car = await createPublicCar({ ...data, specifications: normalisedSpecs });
     publishEvent("listing_created", {
       carId: car.id, make: car.make, model: car.model,
       year: car.year, price: car.price, dealerId: null,

@@ -9,31 +9,53 @@ export type PlanId = "free" | "pro" | "premium";
 export type Drivetrain = "fwd" | "rwd" | "awd" | "4wd";
 export type SellerType = "dealer" | "private" | "login_free";
 export type PriceTier  = "great" | "fair" | "above";
-export type Upholstery = "cloth" | "leather" | "leatherette" | "alcantara" | "other";
+export type Upholstery = "cloth" | "leather" | "leatherette" | "alcantara";
+export type SpecificationsSource = "manual" | "vin_decoder" | "dealer_import" | "marketplace_import";
 
 /**
- * Optional buyer-decision specs. JSONB-backed so we can extend without DB
- * migrations. Keep this list intentional — every field here is one a buyer
- * actually uses to compare cars. Indexable filters should be promoted to
- * dedicated columns once we start filtering by them in /cars search.
+ * Canonical buyer-decision specs. JSONB-backed for the fields that don't
+ * have a dedicated column; existing typed columns (drivetrain,
+ * exteriorColor, interiorColor, previousOwners) are merged into this shape
+ * on read so every consumer sees one consistent object regardless of where
+ * a value is physically stored.
+ *
+ * Names + units are intentional and should NOT drift — server-side
+ * normalization in /api/cars enforces them, and the form/SpecsTable read
+ * them under these exact keys.
  */
 export interface Specifications {
-  // Engine + drivetrain
-  horsepower?:        number;   // hp
-  torqueNm?:          number;
-  engineCC?:          number;   // alt to engine_size_l; preferred unit
+  // Engine
+  engineCc?:           number;
+  horsepower?:         number;
+  torqueNm?:           number;
+  drivetrain?:         Drivetrain;
+
   // Efficiency
-  fuelEconomyKmL?:    number;   // hide for fuel=electric
+  fuelEconomyKmL?:     number;
+
   // EV / hybrid
   batteryCapacityKwh?: number;
-  batteryRangeKm?:    number;
-  chargingTimeHours?: number;
-  // Capacity (body-type-dependent)
-  seats?:             number;
-  payloadKg?:         number;   // pickup
-  towingKg?:          number;   // pickup
-  // Interior
-  upholstery?:        Upholstery;
+  rangeKm?:            number;   // electric range (was batteryRangeKm)
+  chargingTimeHours?:  number;
+
+  // Capacity
+  seats?:              number;
+  payloadKg?:          number;
+  towingCapacityKg?:   number;   // (was towingKg)
+
+  // Appearance — kept as typed cols today but exposed under Specifications
+  // so the buyer-facing contract is one type.
+  exteriorColor?:      string;
+  interiorColor?:      string;
+  upholstery?:         Upholstery;
+
+  // Ownership
+  previousOwners?:     number;
+
+  // Provenance — set server-side on every write. Lets future imports
+  // (VIN decoder, dealer feed) annotate where data came from without
+  // changing the read path.
+  source?:             SpecificationsSource;
 }
 
 export interface Car {

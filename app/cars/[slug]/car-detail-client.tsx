@@ -207,6 +207,10 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
                     </div>
                   ))}
                 </div>
+
+                {/* Quick-facts row — only the most scannable optional specs.
+                    Hidden entirely when the seller hasn't filled any of them. */}
+                <QuickFacts car={car!} />
               </div>
 
               {/* Tabs */}
@@ -452,6 +456,35 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
   );
 }
 
+// Single scannable line of the most decision-driving optional specs. Most
+// buyers scan before they read — surfacing 3–5 numbers here saves them a
+// click into the full SpecsTable. Renders nothing when no values are set.
+function QuickFacts({ car }: { car: CarType }) {
+  const s = car.specifications ?? {};
+  const dtLabel: Record<string, string> = {
+    fwd: "FWD", rwd: "RWD", awd: "AWD", "4wd": "4WD",
+  };
+  const bits: string[] = [];
+  if (s.horsepower)      bits.push(`${s.horsepower} hp`);
+  if (s.drivetrain)      bits.push(dtLabel[s.drivetrain] ?? s.drivetrain.toUpperCase());
+  if (s.seats)           bits.push(`${s.seats} seats`);
+  if (s.fuelEconomyKmL)  bits.push(`${s.fuelEconomyKmL} km/L`);
+  else if (s.rangeKm)    bits.push(`${s.rangeKm.toLocaleString()} km range`);
+
+  if (bits.length === 0) return null;
+
+  return (
+    <p className="mt-3 text-sm font-medium text-foreground">
+      {bits.map((b, i) => (
+        <span key={b}>
+          {i > 0 && <span className="text-muted mx-2">·</span>}
+          {b}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 // Buyer-facing specifications panel. Groups always-present fields with the
 // optional Specifications JSONB the seller may have filled in. Empty values
 // are skipped so we never show "—" rows that look like a half-broken form.
@@ -471,7 +504,7 @@ function SpecsTable({
   };
   const upholsteryLabel: Record<string, string> = {
     cloth: "Cloth", leather: "Leather", leatherette: "Leatherette",
-    alcantara: "Alcantara", other: "Other",
+    alcantara: "Alcantara",
   };
 
   const groups: { title: string; rows: [string, string | undefined][] }[] = [
@@ -493,7 +526,7 @@ function SpecsTable({
         ["Fuel type",        fuelLabel],
         ["Transmission",     car.transmission === "auto" ? "Automatic" : "Manual"],
         ["Drivetrain",       car.drivetrain ? drivetrainLabel[car.drivetrain] : undefined],
-        ["Engine capacity",  s.engineCC ? `${s.engineCC.toLocaleString()} cc` : (car.engineSizeL ? `${car.engineSizeL} L` : undefined)],
+        ["Engine capacity",  s.engineCc ? `${s.engineCc.toLocaleString()} cc` : (car.engineSizeL ? `${car.engineSizeL} L` : undefined)],
         ["Horsepower",       s.horsepower ? `${s.horsepower} hp` : undefined],
         ["Torque",           s.torqueNm ? `${s.torqueNm} Nm` : undefined],
         ["Fuel economy",     s.fuelEconomyKmL ? `${s.fuelEconomyKmL} km/L` : undefined],
@@ -504,7 +537,7 @@ function SpecsTable({
       title: "Battery & range",
       rows: [
         ["Battery capacity", s.batteryCapacityKwh ? `${s.batteryCapacityKwh} kWh` : undefined],
-        ["Range",            s.batteryRangeKm ? `${s.batteryRangeKm.toLocaleString()} km` : undefined],
+        ["Range",            s.rangeKm ? `${s.rangeKm.toLocaleString()} km` : undefined],
         ["Charging time",    s.chargingTimeHours ? `${s.chargingTimeHours} hrs` : undefined],
       ],
     },
@@ -513,7 +546,7 @@ function SpecsTable({
       rows: [
         ["Seats",            s.seats ? String(s.seats) : undefined],
         ["Payload",          s.payloadKg ? `${s.payloadKg.toLocaleString()} kg` : undefined],
-        ["Towing capacity",  s.towingKg ? `${s.towingKg.toLocaleString()} kg` : undefined],
+        ["Towing capacity",  s.towingCapacityKg ? `${s.towingCapacityKg.toLocaleString()} kg` : undefined],
       ],
     },
     {

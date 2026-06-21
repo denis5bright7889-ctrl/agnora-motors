@@ -12,6 +12,7 @@ import {
   Check, Lock, ShieldCheck, Zap, ChevronDown, Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { trackEvent } from "@/lib/analytics";
 
 // ─── Schema (same fields, kept as a single form to preserve values across steps) ──
 const schema = z.object({
@@ -45,17 +46,17 @@ const schema = z.object({
   // Numbers are nullable-on-blank: react-hook-form gives "" for an empty
   // number input, so coerce to undefined before validation.
   specifications: z.object({
-    horsepower:         optionalNum(20, 2000),
-    torqueNm:           optionalNum(20, 3000),
-    engineCC:           optionalNum(50, 10_000),
-    fuelEconomyKmL:     optionalNum(1, 60, true),
+    engineCc:           optionalNum(50, 20_000),
+    horsepower:         optionalNum(20, 2_500),
+    torqueNm:           optionalNum(20, 5_000),
+    fuelEconomyKmL:     optionalNum(1, 100, true),
     batteryCapacityKwh: optionalNum(1, 500, true),
-    batteryRangeKm:     optionalNum(20, 2000),
+    rangeKm:            optionalNum(20, 2_000),
     chargingTimeHours:  optionalNum(0.1, 72, true),
-    seats:              optionalNum(1, 80),
+    seats:              optionalNum(1, 60),
     payloadKg:          optionalNum(50, 50_000),
-    towingKg:           optionalNum(50, 50_000),
-    upholstery:         z.enum(["cloth", "leather", "leatherette", "alcantara", "other"]).optional().or(z.literal("")),
+    towingCapacityKg:   optionalNum(50, 50_000),
+    upholstery:         z.enum(["cloth", "leather", "leatherette", "alcantara"]).optional().or(z.literal("")),
   }).default({}),
 });
 
@@ -317,6 +318,27 @@ export default function PublicListingPage() {
       body: JSON.stringify({ ...clean, images: imageUrls, features }),
     });
     if (res.ok) {
+      // Track usage of the optional Technical specifications panel so we
+      // can tell which fields sellers actually engage with before building
+      // more. Count any non-empty value among the JSONB-native + typed-col
+      // spec fields the form exposes.
+      const specVals = [
+        clean.specifications?.engineCc, clean.specifications?.horsepower, clean.specifications?.torqueNm,
+        clean.specifications?.fuelEconomyKmL, clean.specifications?.batteryCapacityKwh,
+        clean.specifications?.rangeKm, clean.specifications?.chargingTimeHours,
+        clean.specifications?.seats, clean.specifications?.payloadKg, clean.specifications?.towingCapacityKg,
+        clean.specifications?.upholstery,
+        clean.drivetrain, clean.exteriorColor, clean.interiorColor, clean.previousOwners,
+      ];
+      const filledFields = specVals.filter((v) => v != null && v !== "").length;
+      if (filledFields > 0) {
+        trackEvent("listing_specifications_completed", {
+          filledFields,
+          fuelType: clean.fuel,
+          bodyType: clean.bodyType,
+        });
+      }
+
       try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       images.forEach((i) => { if (i.previewUrl.startsWith("blob:")) URL.revokeObjectURL(i.previewUrl); });
       setSaved(true);
@@ -543,7 +565,7 @@ export default function PublicListingPage() {
                           {watched.fuel !== "electric" && (
                             <Field label="Engine capacity (cc)">
                               <input
-                                {...register("specifications.engineCC")}
+                                {...register("specifications.engineCc")}
                                 type="number"
                                 placeholder="2000"
                                 className={inputCls(false)}
@@ -621,7 +643,7 @@ export default function PublicListingPage() {
                             </Field>
                             <Field label={watched.fuel === "electric" ? "Range (km)" : "EV-only range (km)"}>
                               <input
-                                {...register("specifications.batteryRangeKm")}
+                                {...register("specifications.rangeKm")}
                                 type="number"
                                 placeholder="450"
                                 className={inputCls(false)}
@@ -657,7 +679,7 @@ export default function PublicListingPage() {
                             </Field>
                             <Field label="Towing capacity (kg)">
                               <input
-                                {...register("specifications.towingKg")}
+                                {...register("specifications.towingCapacityKg")}
                                 type="number"
                                 placeholder="3500"
                                 className={inputCls(false)}
@@ -707,7 +729,6 @@ export default function PublicListingPage() {
                               <option value="leather">Leather</option>
                               <option value="leatherette">Leatherette</option>
                               <option value="alcantara">Alcantara</option>
-                              <option value="other">Other</option>
                             </select>
                           </Field>
                           <Field label="Previous owners">
