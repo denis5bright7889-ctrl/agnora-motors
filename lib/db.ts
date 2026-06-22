@@ -4,6 +4,7 @@ import type { SearchFilters, SearchResponse, SearchFacets, FacetBucket } from "@
 import { expandAliases } from "@/lib/search-aliases";
 import { getCentroid } from "@/lib/locations";
 import { QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, MAX_VIN_LEN } from "@/lib/quality-policy";
+import { normalizeEmail } from "@/lib/email-normalize";
 
 // Use Pool (pg-compatible) so .query(text, params) works correctly.
 // The neon() tagged-template function does NOT expose a .query() method —
@@ -67,7 +68,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
   const rows = await query<User>(
     `SELECT id, name, email, image, role, created_at AS "createdAt"
      FROM users WHERE email = $1 LIMIT 1`,
-    [email],
+    [normalizeEmail(email)],
   );
   return rows[0] ?? null;
 }
@@ -83,17 +84,142 @@ export async function getUserById(id: string): Promise<User | null> {
 
 export async function getUserWithHash(
   email: string,
-): Promise<(User & { passwordHash: string | null; emailVerified: boolean; isActive: boolean }) | null> {
-  const rows = await query<User & { passwordHash: string | null; emailVerified: boolean; isActive: boolean }>(
+): Promise<(User & { passwordHash: string | null; emailVerified: boolean; isActive: boolean; provider: string; googleId: string | null }) | null> {
+  const rows = await query<User & { passwordHash: string | null; emailVerified: boolean; isActive: boolean; provider: string; googleId: string | null }>(
     `SELECT id, name, email, image, role,
             password_hash      AS "passwordHash",
             email_verified     AS "emailVerified",
             COALESCE(is_active, TRUE) AS "isActive",
+            provider,
+            google_id          AS "googleId",
             created_at         AS "createdAt"
      FROM users WHERE email = $1 LIMIT 1`,
-    [email],
+    [normalizeEmail(email)],
   );
   return rows[0] ?? null;
+}
+
+// PR-auth: lightweight provider check used by the credentials authorize()
+// path to tell the user "this account uses Google sign-in" instead of the
+// generic "invalid email/password" when password_hash IS NULL.
+export interface UserAuthMethods {
+  exists:       boolean;
+  hasPassword:  boolean;
+  hasGoogle:    boolean;
+  provider:     string;
+  emailVerified: boolean;
+  isActive:     boolean;
+}
+
+export async function getUserAuthMethods(email: string): Promise<UserAuthMethods> {
+  const rows = await query<{
+    password_hash: string | null;
+    google_id:     string | null;
+    provider:      string;
+    email_verified: boolean;
+    is_active:     boolean | null;
+  }>(
+    `SELECT password_hash, google_id, provider, email_verified, is_active
+     FROM users WHERE email = $1 LIMIT 1`,
+    [normalizeEmail(email)],
+  );
+  const row = rows[0];
+  if (!row) {
+    return { exists: false, hasPassword: false, hasGoogle: false, provider: "", emailVerified: false, isActive: false };
+  }
+  return {
+    exists:        true,
+    hasPassword:   row.password_hash !== null,
+    hasGoogle:     row.google_id     !== null,
+    provider:      row.provider,
+    emailVerified: row.email_verified === true,
+    isActive:      row.is_active     !== false,
+  };
+}
+
+/** Append 'google' (or 'email') to the provider field if not already present. */
+function mergeProvider(current: string, add: "email" | "google"): string {
+  const parts = new Set(current.split(",").map((p) => p.trim()).filter(Boolean));
+  parts.add(add);
+  return [...parts].sort().join(",");
+}
+
+/** Link a Google account to an existing user, marking email_verified true. */
+export async function linkGoogleAccount(userId: string, googleId: string): Promise<void> {
+  // Read-modify-write so we don't clobber 'email' when merging providers.
+  const rows = await query<{ provider: string }>(
+    `SELECT provider FROM users WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  const merged = mergeProvider(rows[0]?.provider ?? "email", "google");
+  await query(
+    `UPDATE users
+     SET google_id = $1,
+         provider  = $2,
+         email_verified = TRUE
+     WHERE id = $3`,
+    [googleId, merged, userId],
+  );
+}
+
+/** Set the password hash on a user (registration or password reset). */
+export async function setUserPasswordHash(userId: string, passwordHash: string): Promise<void> {
+  const rows = await query<{ provider: string }>(
+    `SELECT provider FROM users WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  const merged = mergeProvider(rows[0]?.provider ?? "email", "email");
+  await query(
+    `UPDATE users
+     SET password_hash = $1,
+         provider      = $2
+     WHERE id = $3`,
+    [passwordHash, merged, userId],
+  );
+}
+
+/** Stamp last_login_at — fire-and-forget at the call site is fine. */
+export async function updateLastLogin(userId: string): Promise<void> {
+  await query(
+    `UPDATE users SET last_login_at = NOW() WHERE id = $1`,
+    [userId],
+  );
+}
+
+/** Password-reset code helpers (30 min expiry). */
+export async function setResetCode(email: string, code: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE users
+     SET reset_code = $1,
+         reset_code_expires_at = NOW() + INTERVAL '30 minutes'
+     WHERE email = $2
+     RETURNING id`,
+    [code, normalizeEmail(email)],
+  );
+  return rows.length > 0;
+}
+
+export async function consumeResetCode(email: string, code: string, newPasswordHash: string): Promise<boolean> {
+  const rows = await query<{ id: string; provider: string }>(
+    `SELECT id, provider FROM users
+     WHERE email = $1 AND reset_code = $2 AND reset_code_expires_at > NOW()
+     LIMIT 1`,
+    [normalizeEmail(email), code],
+  );
+  const row = rows[0];
+  if (!row) return false;
+  const merged = mergeProvider(row.provider, "email");
+  await query(
+    `UPDATE users
+     SET password_hash = $1,
+         provider = $2,
+         reset_code = NULL,
+         reset_code_expires_at = NULL,
+         email_verified = TRUE
+     WHERE id = $3`,
+    [newPasswordHash, merged, row.id],
+  );
+  return true;
 }
 
 export async function setVerificationCode(email: string, code: string): Promise<void> {
@@ -101,7 +227,7 @@ export async function setVerificationCode(email: string, code: string): Promise<
     `UPDATE users
      SET verification_code = $1, verification_expires_at = NOW() + INTERVAL '15 minutes'
      WHERE email = $2`,
-    [code, email],
+    [code, normalizeEmail(email)],
   );
 }
 
@@ -113,7 +239,7 @@ export async function verifyEmailCode(email: string, code: string): Promise<bool
        AND verification_code = $2
        AND verification_expires_at > NOW()
      RETURNING id`,
-    [email, code],
+    [normalizeEmail(email), code],
   );
   return rows.length > 0;
 }
@@ -126,22 +252,32 @@ export async function markUserEmailVerified(userId: string): Promise<void> {
 }
 
 export async function createUser(data: {
-  email: string;
-  name: string;
+  email:        string;
+  name:         string;
   passwordHash?: string;
-  role?: string;
-  image?: string;
+  role?:        string;
+  image?:       string;
+  /** 'email' | 'google' — defaults to 'email' when a password hash is supplied, 'google' otherwise. */
+  provider?:    "email" | "google";
+  googleId?:    string;
 }): Promise<User> {
+  const provider = data.provider
+    ?? (data.passwordHash ? "email" : data.googleId ? "google" : "email");
   const rows = await query<User>(
-    `INSERT INTO users (email, name, password_hash, role, image)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO users (email, name, password_hash, role, image, provider, google_id, email_verified)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
      RETURNING id, name, email, image, role, created_at AS "createdAt"`,
     [
-      data.email,
+      normalizeEmail(data.email),
       data.name,
       data.passwordHash ?? null,
-      data.role ?? "buyer",
-      data.image ?? null,
+      data.role         ?? "buyer",
+      data.image        ?? null,
+      provider,
+      data.googleId     ?? null,
+      // Google-issued emails are pre-verified by Google itself; email/password
+      // accounts still need to clear the verification flow before login.
+      provider === "google",
     ],
   );
   if (!rows[0]) throw new Error("User insert returned no rows");

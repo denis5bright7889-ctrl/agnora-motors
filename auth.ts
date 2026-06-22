@@ -1,12 +1,18 @@
-import NextAuth, { type DefaultSession } from "next-auth";
+import NextAuth, { type DefaultSession, CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
-import { getUserWithHash, createUser, getUserByEmail, markUserEmailVerified, isDbConfigured } from "@/lib/db";
+import {
+  getUserWithHash, createUser, getUserByEmail, markUserEmailVerified, isDbConfigured,
+  getUserAuthMethods, linkGoogleAccount, updateLastLogin,
+} from "@/lib/db";
 import { findLocalUser } from "@/lib/local-users";
 import { authConfig } from "./auth.config";
+import { normalizeEmail } from "@/lib/email-normalize";
+import { checkRateLimit, resetRateLimit } from "@/lib/rate-limit";
+import { recordAuthEvent } from "@/lib/auth-audit";
 
 declare module "next-auth" {
   interface Session {
@@ -25,21 +31,29 @@ declare module "next-auth" {
 function getEnvAdmin() {
   const email    = process.env.ADMIN_EMAIL;
   const name     = process.env.ADMIN_NAME ?? "Admin";
-  // ADMIN_PASSWORD  — plain text (preferred, no $ expansion issues)
-  // ADMIN_PASSWORD_HASH — bcrypt hash (fallback, fragile with dotenv-expand)
   const password = process.env.ADMIN_PASSWORD;
   const hash     = process.env.ADMIN_PASSWORD_HASH;
   if (!email || (!password && !hash)) return null;
   return { id: "env-admin", email, name, role: "admin", password, passwordHash: hash };
 }
 
+// ── Typed CredentialsSignin subclasses ──────────────────────────────────────
+// NextAuth v5 lets us subclass CredentialsSignin to give the client a stable
+// machine-readable `code` so the login page can render a specific message
+// instead of "Invalid email or password" for every failure mode.
+// The .code field is what surfaces in the URL/error returned to the client.
+
+class GoogleAccountError extends CredentialsSignin   { code = "use_google"; }
+class EmailNotVerifiedError extends CredentialsSignin { code = "email_not_verified"; }
+class AccountInactiveError extends CredentialsSignin  { code = "account_inactive"; }
+class RateLimitedError extends CredentialsSignin      { code = "rate_limited"; }
+class InvalidCredentialsError extends CredentialsSignin { code = "invalid_credentials"; }
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
 
-  // AUTH_SECRET is the v5 canonical name; NEXTAUTH_SECRET kept for fallback.
   secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
-
-  debug: process.env.NODE_ENV === "development",
+  debug:  process.env.NODE_ENV === "development",
 
   providers: [
     Google({
@@ -47,8 +61,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
       authorization: {
         params: {
-          // Force account chooser every time and request offline access so
-          // NextAuth always receives a fresh refresh token on each sign-in.
           prompt:        "select_account",
           access_type:   "offline",
           response_type: "code",
@@ -67,63 +79,96 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           .safeParse(credentials);
 
         if (!parsed.success) {
-          console.log("[authorize] validation failed:", parsed.error.flatten().fieldErrors);
-          return null;
+          throw new InvalidCredentialsError();
         }
 
-        const { email, password } = parsed.data;
+        const email    = normalizeEmail(parsed.data.email);
+        const password = parsed.data.password;
 
-        // 1. Env-based admin fallback (no DB required)
+        // ── Rate limit: 5 attempts / 60s / email ──────────────────────────
+        const rl = checkRateLimit(`login:${email}`);
+        if (!rl.ok) {
+          recordAuthEvent("auth_login_failed", { email, reason: "rate_limited" });
+          throw new RateLimitedError();
+        }
+
+        // 1. Env-based admin fallback (no DB required).
         const envAdmin = getEnvAdmin();
-        if (envAdmin && email.toLowerCase() === envAdmin.email.toLowerCase()) {
+        if (envAdmin && email === normalizeEmail(envAdmin.email)) {
           let valid = false;
           if (envAdmin.password) {
-            // Timing-safe plain comparison — avoids dotenv-expand mangling $ in bcrypt hashes
             const a = Buffer.from(password);
             const b = Buffer.from(envAdmin.password);
             valid = a.length === b.length && timingSafeEqual(a, b);
           } else if (envAdmin.passwordHash) {
             valid = await bcrypt.compare(password, envAdmin.passwordHash);
           }
-          console.log("[authorize] env-admin email=%s valid=%s", email, valid);
-          if (!valid) return null;
+          if (!valid) {
+            recordAuthEvent("auth_login_failed", { email, reason: "invalid_credentials", provider: "env-admin" });
+            throw new InvalidCredentialsError();
+          }
+          resetRateLimit(`login:${email}`);
+          recordAuthEvent("auth_login_success", { email, provider: "env-admin" });
           return { id: envAdmin.id, email: envAdmin.email, name: envAdmin.name, role: envAdmin.role };
         }
 
-        // 2. File-based local users (no DB required)
+        // 2. File-based local users (dev fallback when DB is offline).
         const localUser = findLocalUser(email);
         if (localUser) {
           const valid = await bcrypt.compare(password, localUser.passwordHash);
-          console.log("[authorize] local-user email=%s valid=%s", email, valid);
-          if (!valid) return null;
+          if (!valid) {
+            recordAuthEvent("auth_login_failed", { email, reason: "invalid_credentials", provider: "local" });
+            throw new InvalidCredentialsError();
+          }
+          resetRateLimit(`login:${email}`);
+          recordAuthEvent("auth_login_success", { email, provider: "local" });
           return { id: localUser.id, email: localUser.email, name: localUser.name, role: localUser.role };
         }
 
-        // 3. Database users
+        // 3. Database users.
         if (!isDbConfigured()) {
-          console.log("[authorize] no DB configured and no local user found for %s", email);
-          return null;
+          recordAuthEvent("auth_login_failed", { email, reason: "no_db" });
+          throw new InvalidCredentialsError();
         }
 
         try {
           const user = await getUserWithHash(email);
-          if (!user?.passwordHash) {
-            console.log("[authorize] db: no user or no password hash for %s", email);
-            return null;
-          }
-          const valid = await bcrypt.compare(password, user.passwordHash);
-          console.log("[authorize] db email=%s valid=%s", email, valid);
-          if (!valid) return null;
 
-          if (!user.emailVerified) {
-            console.log("[authorize] db: email not verified for %s", email);
-            return null;
+          // Account doesn't exist OR has no password set yet (Google-only).
+          // We surface a SPECIFIC reason for the Google-only case so the UI
+          // can prompt the user to use Google or set a password — but never
+          // distinguish "no such email" from "wrong password" (no enumeration).
+          if (!user) {
+            recordAuthEvent("auth_login_failed", { email, reason: "no_user" });
+            throw new InvalidCredentialsError();
+          }
+          if (!user.passwordHash) {
+            // The account exists but only has Google. This DOES leak that
+            // the email is registered. Trade-off the spec explicitly asks for.
+            recordAuthEvent("auth_login_failed", { email, reason: "google_only", userId: user.id });
+            throw new GoogleAccountError();
+          }
+
+          const valid = await bcrypt.compare(password, user.passwordHash);
+          if (!valid) {
+            recordAuthEvent("auth_login_failed", { email, reason: "invalid_credentials", userId: user.id });
+            throw new InvalidCredentialsError();
           }
 
           if (user.isActive === false) {
-            console.log("[authorize] db: account deactivated for %s", email);
-            return null;
+            recordAuthEvent("auth_login_failed", { email, reason: "inactive", userId: user.id });
+            throw new AccountInactiveError();
           }
+
+          if (!user.emailVerified) {
+            recordAuthEvent("auth_login_failed", { email, reason: "not_verified", userId: user.id });
+            throw new EmailNotVerifiedError();
+          }
+
+          // Success — clear the bucket, stamp last_login_at, audit.
+          resetRateLimit(`login:${email}`);
+          updateLastLogin(user.id).catch(() => {});
+          recordAuthEvent("auth_login_success", { email, provider: "credentials", userId: user.id });
 
           return {
             id:    user.id,
@@ -133,8 +178,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             role:  user.role,
           };
         } catch (err) {
+          // Re-throw our typed errors so NextAuth surfaces them to the client
+          // with their code. Anything else gets logged + opaque error.
+          if (err instanceof CredentialsSignin) throw err;
           console.error("[authorize] db lookup failed for %s:", email, err instanceof Error ? err.message : err);
-          return null;
+          throw new InvalidCredentialsError();
         }
       },
     }),
@@ -150,55 +198,60 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return true;
     },
 
-    async jwt({ token, user, account }) {
+    async jwt({ token, user, account, profile }) {
       // Branch A: first sign-in — user and account are populated
       if (user) {
-        console.log("[jwt] fresh sign-in provider=%s id=%s email=%s role=%s",
-          account?.provider ?? "credentials",
-          user.id, user.email,
-          (user as { role?: string }).role ?? "buyer",
-        );
         token.id   = user.id;
         token.role = (user as { role?: string }).role ?? "private_seller";
-        token.emailVerified = (user as any).emailVerified ?? null;
+        token.emailVerified = (user as { emailVerified?: Date | null }).emailVerified ?? null;
       }
 
-      // Branch B: Google first sign-in → upsert user into our DB
-      // `account` is only present on the initial OAuth sign-in, not on refresh calls.
+      // Branch B: Google first sign-in → upsert + link with existing email account.
+      // `account` is only present on the initial OAuth sign-in.
       if (account?.provider === "google" && token.email && isDbConfigured()) {
+        const normalizedEmail = normalizeEmail(token.email as string);
+        const googleId        = (profile?.sub as string | undefined) ?? (account.providerAccountId as string | undefined) ?? null;
         try {
-          console.log("[jwt] google upsert start for %s", token.email);
-          const existing = await getUserByEmail(token.email as string);
+          const existing = await getUserByEmail(normalizedEmail);
 
           if (existing) {
+            // Existing user — link Google + ensure verified. This is the path
+            // that fixes the bug where users registered with email/password
+            // first, then later signed in with Google, ended up unable to
+            // use either method consistently.
+            if (googleId) {
+              await linkGoogleAccount(existing.id, googleId);
+              recordAuthEvent("auth_link_google", { userId: existing.id, email: normalizedEmail });
+            } else {
+              // No googleId from the provider — at minimum mark verified.
+              await markUserEmailVerified(existing.id);
+            }
             token.id   = existing.id;
             token.role = existing.role;
-            // Ensure existing Google users are marked as verified (idempotent)
-            markUserEmailVerified(existing.id).catch(() => {/* non-critical */});
-            console.log("[jwt] google found existing user id=%s role=%s", existing.id, existing.role);
           } else {
+            // No user yet — create one with provider='google'.
             const created = await createUser({
-              email: token.email as string,
-              name:  (token.name    as string | undefined) ?? "Google User",
-              image: (token.picture as string | undefined) ?? undefined,
-              role:  "buyer",
+              email:    normalizedEmail,
+              name:     (token.name    as string | undefined) ?? "Google User",
+              image:    (token.picture as string | undefined) ?? undefined,
+              role:     "buyer",
+              provider: "google",
+              googleId: googleId ?? undefined,
             });
-            // Google emails are pre-verified by Google
-            markUserEmailVerified(created.id).catch(() => {/* non-critical */});
+            // createUser already sets email_verified=true for provider='google'.
             token.id   = created.id;
             token.role = "buyer";
-            console.log("[jwt] google created new user id=%s", created.id);
+            recordAuthEvent("auth_register", { userId: created.id, email: normalizedEmail, provider: "google" });
           }
-          // Google accounts are always email-verified
           token.emailVerified = new Date();
+          // Stamp last_login_at — non-blocking.
+          updateLastLogin(token.id as string).catch(() => {});
+          recordAuthEvent("auth_login_success", { email: normalizedEmail, provider: "google" });
         } catch (err) {
-          // Never throw here — a thrown jwt callback causes NextAuth to redirect
-          // to /login?error=Callback, which looks like a login loop.
-          // Fall through gracefully: the user stays signed in with their Google
-          // sub as the id. DB sync can be retried on the next request.
+          // Never throw — would redirect to /login?error=Callback.
           console.error(
             "[jwt] google upsert FAILED for %s — using Google sub as id. Error: %s",
-            token.email,
+            normalizedEmail,
             err instanceof Error ? err.message : String(err),
           );
           if (!token.id)   token.id   = token.sub;
@@ -207,16 +260,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       // Admin email override (covers all providers including Google).
-      // Any sign-in with the configured ADMIN_EMAIL is always treated as admin
-      // and is always considered email-verified — enforced server-side only.
       const adminEmail = process.env.ADMIN_EMAIL;
-      if (adminEmail && (token.email as string)?.toLowerCase() === adminEmail.toLowerCase()) {
+      if (adminEmail && normalizeEmail(token.email as string) === normalizeEmail(adminEmail)) {
         token.role          = "admin";
         token.emailVerified = token.emailVerified ?? new Date();
-        console.log("[jwt] ADMIN LOGIN DETECTED email=%s", token.email);
       }
 
-      // Admin tokens are always email-verified (env admin has no emailVerified in DB)
+      // Admin tokens are always email-verified.
       if ((token.role as string) === "admin" && !token.emailVerified) {
         token.emailVerified = new Date();
       }
@@ -229,24 +279,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.role          = (token.role as string | undefined) ?? "private_seller";
       session.user.isAdmin       = session.user.role === "admin";
       session.user.emailVerified = (token.emailVerified as Date | null) ?? null;
-
-      console.log("[session] built id=%s role=%s isAdmin=%s email=%s",
-        session.user.id, session.user.role, session.user.isAdmin, session.user.email,
-      );
       return session;
     },
 
-    // Explicit redirect callback with logging to diagnose redirect-loop issues.
     async redirect({ url, baseUrl }) {
-      console.log("[redirect] url=%s baseUrl=%s", url, baseUrl);
-      // Allow relative URLs (e.g. "/", "/cars")
       if (url.startsWith("/")) return `${baseUrl}${url}`;
-      // Allow same-origin absolute URLs
       try {
         if (new URL(url).origin === new URL(baseUrl).origin) return url;
-      } catch {
-        // malformed url — fall through to baseUrl
-      }
+      } catch { /* malformed url */ }
       return baseUrl;
     },
   },

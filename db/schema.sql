@@ -190,6 +190,19 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified          BOOLEAN     N
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_code       TEXT;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_expires_at TIMESTAMPTZ;
 
+-- ── Auth providers (2026-06-22) ──────────────────────────────────────────────
+-- See db/migrations/2026-06-22-auth-providers.sql for the rationale.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS provider      TEXT NOT NULL DEFAULT 'email';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id     TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_id  ON users(google_id) WHERE google_id IS NOT NULL;
+CREATE INDEX        IF NOT EXISTS idx_users_provider   ON users(provider);
+CREATE INDEX        IF NOT EXISTS idx_users_last_login ON users(last_login_at DESC) WHERE last_login_at IS NOT NULL;
+
+-- ── Password reset (2026-06-22) ──────────────────────────────────────────────
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code            TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_code_expires_at TIMESTAMPTZ;
+
 -- ── Private sellers ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS private_sellers (
   id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),

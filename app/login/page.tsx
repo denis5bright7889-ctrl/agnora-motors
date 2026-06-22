@@ -43,7 +43,25 @@ function LoginForm() {
     });
 
     if (result?.error) {
-      setServerError("Invalid email or password");
+      // NextAuth v5: the typed CredentialsSignin subclass in auth.ts sets a
+      // machine-readable `code` that lands on result.code. We also fall back
+      // to parsing it out of result.url (the signed-in URL of the failure
+      // page) in case a downstream version stops surfacing result.code.
+      let code: string | undefined = result.code;
+      if (!code && result.url) {
+        try { code = new URL(result.url).searchParams.get("code") ?? undefined; } catch { /* malformed url */ }
+      }
+      if (!code && typeof window !== "undefined") {
+        try { code = new URLSearchParams(window.location.search).get("code") ?? undefined; } catch { /* nope */ }
+      }
+      const message: Record<string, string> = {
+        use_google:          "This account uses Google sign-in. Continue with Google, or use \"Forgot password\" to set a password.",
+        email_not_verified:  "Your email isn't verified yet. Check your inbox for the verification code.",
+        account_inactive:    "This account has been deactivated. Contact support if you think this is a mistake.",
+        rate_limited:        "Too many attempts. Wait a minute and try again.",
+        invalid_credentials: "Invalid email or password",
+      };
+      setServerError(message[code ?? "invalid_credentials"] ?? message.invalid_credentials);
       return;
     }
 
@@ -126,7 +144,7 @@ function LoginForm() {
         </Field>
 
         <div className="flex justify-end">
-          <Link href="#" className="text-xs text-muted hover:text-foreground transition-colors">
+          <Link href="/forgot-password" className="text-xs text-muted hover:text-foreground transition-colors">
             Forgot password?
           </Link>
         </div>
