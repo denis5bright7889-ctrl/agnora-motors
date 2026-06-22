@@ -1,30 +1,47 @@
 import { NextResponse } from "next/server";
 import { isDbConfigured, searchCarsDb } from "@/lib/db";
-import { parseSearchParams, searchCarsStatic } from "@/lib/search";
-import { cars as staticCars } from "@/data/cars";
+import { parseSearchParams } from "@/lib/search";
+import type { SearchResponse } from "@/lib/search";
 
 export const runtime = "nodejs";
 
 // Always dynamic — search results depend on query string.
 export const dynamic = "force-dynamic";
 
+// Empty response shape — used when DB is empty or unreachable. We
+// deliberately no longer fall back to the demo catalogue: those listings
+// aren't real and showing them on the public marketplace UI was confusing
+// for buyers.
+const EMPTY: SearchResponse = {
+  cars:       [],
+  total:      0,
+  page:       1,
+  limit:      20,
+  totalPages: 0,
+  facets: {
+    makes:          [],
+    bodyTypes:      [],
+    fuels:          [],
+    conditions:     [],
+    locations:      [],
+    transmissions:  [],
+    drivetrains:    [],
+    exteriorColors: [],
+    sellerTypes:    [],
+  },
+  source: "db",
+};
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const filters = parseSearchParams(searchParams);
 
-  if (isDbConfigured()) {
-    try {
-      const response = await searchCarsDb(filters);
-      // If DB is wired but has no rows yet, fall through to the static set so
-      // local/preview environments still show something useful.
-      if (response.total > 0) {
-        return NextResponse.json(response);
-      }
-    } catch (err) {
-      console.error("[/api/cars/search] DB error:", err instanceof Error ? err.message : err);
-      // fall through to static
-    }
-  }
+  if (!isDbConfigured()) return NextResponse.json(EMPTY);
 
-  return NextResponse.json(searchCarsStatic(staticCars, filters));
+  try {
+    return NextResponse.json(await searchCarsDb(filters));
+  } catch (err) {
+    console.error("[/api/cars/search] DB error:", err instanceof Error ? err.message : err);
+    return NextResponse.json(EMPTY);
+  }
 }

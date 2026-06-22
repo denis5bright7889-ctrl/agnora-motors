@@ -1,7 +1,6 @@
 import { CarsListing } from "@/components/cars-listing";
 import { isDbConfigured, searchCarsDb } from "@/lib/db";
-import { parseSearchParams, searchCarsStatic, type SearchResponse } from "@/lib/search";
-import { cars as STATIC_CARS } from "@/data/cars";
+import { parseSearchParams, type SearchResponse } from "@/lib/search";
 
 export const metadata = {
   title: "Buy Cars in Kenya — Agnora Motors",
@@ -10,6 +9,28 @@ export const metadata = {
 
 // Server-side render is dynamic because results depend on query string.
 export const dynamic = "force-dynamic";
+
+// Empty SearchResponse — used when the DB is empty / unreachable. CarsListing
+// already handles total=0 with a real empty state (no demo data leaks in).
+const EMPTY: SearchResponse = {
+  cars:       [],
+  total:      0,
+  page:       1,
+  limit:      20,
+  totalPages: 0,
+  facets: {
+    makes:          [],
+    bodyTypes:      [],
+    fuels:          [],
+    conditions:     [],
+    locations:      [],
+    transmissions:  [],
+    drivetrains:    [],
+    exteriorColors: [],
+    sellerTypes:    [],
+  },
+  source: "db",
+};
 
 function toUrlSearchParams(input: Record<string, string | string[] | undefined>): URLSearchParams {
   const sp = new URLSearchParams();
@@ -29,22 +50,19 @@ export default async function CarsPage({
   const raw     = await searchParams;
   const filters = parseSearchParams(toUrlSearchParams(raw));
 
-  let initial: SearchResponse;
-  if (isDbConfigured()) {
-    try {
-      initial = await searchCarsDb(filters);
-      // If DB is wired but empty, fall through to the static set so dev/preview
-      // environments still render content.
-      if (initial.total === 0) {
-        initial = searchCarsStatic(STATIC_CARS, filters);
-      }
-    } catch (err) {
-      console.error("[/cars] search failed:", err instanceof Error ? err.message : err);
-      initial = searchCarsStatic(STATIC_CARS, filters);
-    }
-  } else {
-    initial = searchCarsStatic(STATIC_CARS, filters);
+  // No DB → empty list. We DELIBERATELY no longer fall back to the demo
+  // catalogue in /data/cars: those listings aren't real, never had real
+  // sellers, and showed up on the marketplace UI looking indistinguishable
+  // from real cars — confusing for buyers, misleading for the funnel.
+  if (!isDbConfigured()) {
+    return <CarsListing initial={EMPTY} />;
   }
 
-  return <CarsListing initial={initial} />;
+  try {
+    const initial = await searchCarsDb(filters);
+    return <CarsListing initial={initial} />;
+  } catch (err) {
+    console.error("[/cars] search failed:", err instanceof Error ? err.message : err);
+    return <CarsListing initial={EMPTY} />;
+  }
 }

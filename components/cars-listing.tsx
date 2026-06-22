@@ -764,11 +764,11 @@ function CarsListingInner({ initial }: Props) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V9a2 2 0 012-2h1l2-3h8l2 3h1a2 2 0 012 2v6a2 2 0 01-2 2h-3m-6 0h6m-3 0v0" />
                   </svg>
                 </div>
-                <h2 className="font-display text-2xl font-medium mb-2">No cars available yet</h2>
-                <p className="text-muted mb-6 max-w-sm">Be the first to list. Join as a dealer and start uploading cars to reach thousands of buyers across Kenya.</p>
-                <a href="/dealer/register"
+                <h2 className="font-display text-2xl font-medium mb-2">No cars listed yet</h2>
+                <p className="text-muted mb-6 max-w-sm">Be the first. No account required — list your car in under four minutes and reach buyers across Kenya.</p>
+                <a href="/sell/new"
                   className="inline-flex h-11 items-center gap-2 rounded-full bg-accent text-white px-7 text-sm font-semibold hover:opacity-90 transition-opacity">
-                  List your first car <ChevronRight className="h-4 w-4" />
+                  List your car <ChevronRight className="h-4 w-4" />
                 </a>
               </div>
             ) : cars.length === 0 ? (
