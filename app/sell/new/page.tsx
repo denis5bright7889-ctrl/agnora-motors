@@ -705,9 +705,15 @@ export default function PublicListingPage() {
                   <Field label="Description" error={errors.description?.message}>
                     <textarea
                       {...register("description")}
-                      rows={5}
+                      rows={10}
                       placeholder="Condition, import history, service records, notable features, any known issues. The more honest, the faster it sells."
-                      className={cn(inputCls(!!errors.description), "resize-none py-3 leading-relaxed")}
+                      // The base inputCls forces h-11 on regular inputs — kill it for the
+                      // textarea so the rows / min-h take effect. resize-y lets the seller
+                      // drag taller if they want even more room.
+                      className={cn(
+                        inputCls(!!errors.description),
+                        "!h-auto min-h-[240px] sm:min-h-[280px] resize-y py-3 leading-relaxed",
+                      )}
                     />
                   </Field>
                 </Card>
