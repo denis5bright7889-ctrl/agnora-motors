@@ -12,7 +12,17 @@ export type AnalyticsEvent =
   // Seller funnel — usage of the optional Technical specifications panel.
   // Fired on POST success when the seller filled at least one spec field.
   // Props: { filledFields: number, fuelType: string, bodyType: string }.
-  | "listing_specifications_completed";
+  | "listing_specifications_completed"
+  // VIN decoder funnel — measure hit rate so we know when to add a JDM
+  // provider. Fired on the seller-side, not server-side.
+  //   _attempted props: { vinLength }
+  //   _succeeded props: { source, matchedFields: string[] } — source is
+  //     "nhtsa" | "cache" | "manual" (manual = no match).
+  //   _applied   props: { appliedFields: string[] } — fields the seller
+  //     actually accepted from the decoder (post-filter for empty-only).
+  | "vin_decode_attempted"
+  | "vin_decode_succeeded"
+  | "vin_decode_applied";
 
 const SESSION_KEY = "agnora_session_id";
 

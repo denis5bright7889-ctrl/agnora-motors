@@ -681,3 +681,18 @@ FROM (VALUES
 ) AS v(make_slug, slug, name)
 JOIN makes m ON m.slug = v.make_slug
 ON CONFLICT (make_id, slug) DO NOTHING;
+
+-- ============================================================
+-- VIN decoder cache. NHTSA vPIC (or any future decoder) results are
+-- expensive (network + slow) and deterministic per VIN, so we cache the
+-- decoded payload + the raw upstream response for diagnostics. Source
+-- column lets us track which decoder produced each entry once we add
+-- additional providers (JDM-specialised, dealer feed import, etc).
+-- ============================================================
+CREATE TABLE IF NOT EXISTS vin_cache (
+  vin         TEXT PRIMARY KEY,
+  source      TEXT NOT NULL,                 -- "nhtsa", "manual", "dealer_import", future "jdm_decoder", …
+  decoded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  fields      JSONB NOT NULL DEFAULT '{}'::jsonb,  -- normalised Specifications-compatible shape
+  raw         JSONB NOT NULL DEFAULT '{}'::jsonb   -- raw upstream payload, for debugging + future re-mapping
+);
