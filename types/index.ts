@@ -3,7 +3,15 @@ export type Fuel = "petrol" | "diesel" | "hybrid" | "electric";
 export type Transmission = "auto" | "manual";
 export type BodyType = "suv" | "sedan" | "hatchback" | "pickup" | "coupe" | "wagon" | "van";
 export type DealerStatus = "pending" | "approved" | "rejected";
-export type CarStatus = "active" | "sold" | "draft";
+// Public visibility helper only matches "active". Anything else is invisible
+// to /cars, /cars/[slug], and /api/cars/search.
+//   active   — published, included in public listings
+//   sold     — published as sold (still visible to owner; hidden by visibility filter)
+//   draft    — owner hasn't published yet
+//   hidden   — admin temporarily took it down; owner can re-edit and resubmit
+//   rejected — admin rejected (policy violation, fraud); reason shown to owner
+//   archived — soft-deleted by admin or owner; reversible but invisible everywhere
+export type CarStatus = "active" | "sold" | "draft" | "hidden" | "rejected" | "archived";
 export type UserRole = "admin" | "dealer" | "private_seller" | "buyer";
 export type PlanId = "free" | "pro" | "premium";
 export type Drivetrain = "fwd" | "rwd" | "awd" | "4wd";
@@ -208,6 +216,11 @@ export interface DealerCar {
   // Buyer-decision specs, JSONB on the cars table. See Specifications type.
   specifications?: Specifications | null;
   status: CarStatus;
+  // Moderation trail (admin actions only). moderatedBy holds the admin user id;
+  // moderationReason is shown to the owner on rejected listings.
+  moderatedBy?: string | null;
+  moderatedAt?: string | null;
+  moderationReason?: string | null;
   createdAt: string;
   updatedAt: string;
   views?: number;
@@ -220,6 +233,11 @@ export interface User {
   email: string;
   image?: string | null;
   role: UserRole;
+  // Soft suspension: is_active is the enforcement flag (already used by auth).
+  // suspendedAt/Reason explain when and why so support can answer "why am I locked out".
+  isActive?: boolean;
+  suspendedAt?: string | null;
+  suspendedReason?: string | null;
   createdAt: string;
 }
 

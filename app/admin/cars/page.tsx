@@ -3,7 +3,8 @@ import { Search } from "lucide-react";
 import { getAllDbCars, isDbConfigured } from "@/lib/db";
 import { cars as staticCars } from "@/data/cars";
 import { formatPrice } from "@/lib/utils";
-import type { DealerCar } from "@/types";
+import type { CarStatus, DealerCar } from "@/types";
+import { ModerationActions } from "./moderation-actions";
 
 function cn(...cls: (string | boolean | undefined)[]) {
   return cls.filter(Boolean).join(" ");
@@ -100,6 +101,9 @@ export default async function AdminCarsPage({
           <option value="active">Active</option>
           <option value="draft">Draft</option>
           <option value="sold">Sold</option>
+          <option value="hidden">Hidden</option>
+          <option value="rejected">Rejected</option>
+          <option value="archived">Archived</option>
         </select>
         <button
           type="submit"
@@ -169,14 +173,22 @@ export default async function AdminCarsPage({
                 <td className="px-4 py-3">
                   <StatusBadge status={car.status} />
                 </td>
-                <td className="px-4 py-3 text-center">
-                  <Link
-                    href={`/cars/${car.slug}`}
-                    className="text-xs text-accent hover:underline font-medium"
-                    target="_blank"
-                  >
-                    View
-                  </Link>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-3">
+                    <Link
+                      href={`/cars/${car.slug}`}
+                      className="text-xs text-accent hover:underline font-medium"
+                      target="_blank"
+                    >
+                      View
+                    </Link>
+                    {car.source === "dealer" && (
+                      <ModerationActions
+                        carId={car.id}
+                        currentStatus={car.status}
+                      />
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -193,11 +205,14 @@ export default async function AdminCarsPage({
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status }: { status: CarStatus | string }) {
   const map: Record<string, string> = {
-    active: "bg-green-500/15 text-green-600 dark:text-green-400",
-    draft: "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",
-    sold: "bg-surface-2 text-muted",
+    active:   "bg-green-500/15 text-green-600 dark:text-green-400",
+    draft:    "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400",
+    sold:     "bg-surface-2 text-muted",
+    hidden:   "bg-orange-500/15 text-orange-600 dark:text-orange-400",
+    rejected: "bg-red-500/15 text-red-600 dark:text-red-400",
+    archived: "bg-zinc-500/15 text-zinc-500",
   };
   return (
     <span

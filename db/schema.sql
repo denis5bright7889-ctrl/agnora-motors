@@ -68,6 +68,11 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS boost_expires_at        TIMESTAMPTZ;
 -- Contact details for login-free ("public") listings that have no dealer/seller account.
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS seller_name             TEXT;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS seller_phone            TEXT;
+-- Moderation: status can be 'hidden' | 'rejected' | 'archived' on top of the
+-- base 'active' | 'sold' | 'draft'. These columns explain who/when/why.
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderated_by            TEXT;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderated_at            TIMESTAMPTZ;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderation_reason       TEXT;
 
 CREATE TABLE IF NOT EXISTS car_views (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

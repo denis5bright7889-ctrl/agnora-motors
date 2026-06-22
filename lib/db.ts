@@ -449,6 +449,9 @@ export async function getDealerCars(dealerId: string): Promise<DealerCar[]> {
   );
 }
 
+// Admin-facing: returns EVERY listing in the cars table regardless of status,
+// including hidden / archived / rejected — so /admin/cars can moderate them.
+// Public surfaces must use getPublicCars() / buildPublicListingVisibilityWhere().
 export async function getAllDbCars(): Promise<DealerCar[]> {
   return query<DealerCar>(
     `SELECT c.id, c.dealer_id AS "dealerId", c.slug, c.year, c.make,
@@ -457,11 +460,13 @@ export async function getAllDbCars(): Promise<DealerCar[]> {
             c.images, c.features, c.verified, c.status,
             c.financing_available  AS "financingAvailable",
             c.hire_purchase_available AS "hirePurchaseAvailable",
+            c.moderated_by     AS "moderatedBy",
+            c.moderated_at     AS "moderatedAt",
+            c.moderation_reason AS "moderationReason",
             c.created_at AS "createdAt", c.updated_at AS "updatedAt",
             COUNT(DISTINCT v.id)::INT AS views
      FROM cars c
      LEFT JOIN car_views v ON v.car_id = c.id
-     WHERE c.status = 'active'
      GROUP BY c.id
      ORDER BY c.created_at DESC`,
   );
@@ -767,6 +772,53 @@ export async function getListingComplianceStats(): Promise<ComplianceStats> {
 
 export async function deleteDealerCar(id: string, dealerId: string): Promise<void> {
   await query("DELETE FROM cars WHERE id = $1 AND dealer_id = $2", [id, dealerId]);
+}
+
+// ── Admin moderation ──────────────────────────────────────────
+// Soft-status change (hidden / archived / rejected / active / sold). The caller
+// MUST have already verified the session is an admin — this helper does NOT
+// re-check. Stamping moderated_by/at/reason lets the seller see *why* their
+// listing was taken down without joining admin_logs.
+export async function adminModerateCar(
+  carId: string,
+  adminId: string,
+  newStatus: CarStatus,
+  reason: string | null,
+): Promise<void> {
+  await query(
+    `UPDATE cars
+     SET status            = $1,
+         moderated_by      = $2,
+         moderated_at      = NOW(),
+         moderation_reason = $3,
+         updated_at        = NOW()
+     WHERE id = $4`,
+    [newStatus, adminId, reason, carId],
+  );
+}
+
+// True delete — irreversible, admin-only. Used when a listing is spam / fraud
+// / illegal and must not appear in analytics or recovery flows. Prefer
+// adminModerateCar(..., 'archived') for ordinary takedowns.
+export async function adminDeleteCar(carId: string): Promise<void> {
+  await query("DELETE FROM cars WHERE id = $1", [carId]);
+}
+
+// Loads any car by id regardless of status — used by admin moderation endpoints
+// that must operate on hidden / archived rows the public visibility helper hides.
+export async function getCarByIdAdmin(carId: string): Promise<DealerCar | null> {
+  const rows = await query<DealerCar>(
+    `SELECT id, dealer_id AS "dealerId", slug, year, make, model, trim, price,
+            mileage, fuel, transmission, body_type AS "bodyType", condition,
+            location, description, images, features, verified, status,
+            moderated_by AS "moderatedBy", moderated_at AS "moderatedAt",
+            moderation_reason AS "moderationReason",
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM cars WHERE id = $1
+     LIMIT 1`,
+    [carId],
+  );
+  return rows[0] ?? null;
 }
 
 // ── Analytics ──────────────────────────────────────────────
