@@ -145,7 +145,7 @@ export default function PublicListingPage() {
   // VIN decoder state. `decode` is the result of the last attempt (null
   // before first attempt), `decoding` is the in-flight flag.
   const [decoding, setDecoding]       = useState(false);
-  const [decode, setDecode]           = useState<null | { decoded: boolean; source: string; fields: DecodedVehicle }>(null);
+  const [decode, setDecode]           = useState<null | { decoded: boolean; source: string; fields: DecodedVehicle; applied: string[] }>(null);
   const [decodeError, setDecodeError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -156,7 +156,7 @@ export default function PublicListingPage() {
 
   const {
     register, control, trigger, handleSubmit, getValues, setValue,
-    formState: { errors, isSubmitting },
+    formState: { errors, isSubmitting, dirtyFields },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     // Keep values across step transitions even when fields are unmounted.
@@ -270,9 +270,11 @@ export default function PublicListingPage() {
   }
 
   // ── VIN decoder ─────────────────────────────────────────────────────────
-  // Calls /api/vin/decode and surfaces a banner the seller chooses to apply.
-  // No auto-fill on the wire — we only mutate the form when they hit Apply,
-  // so the decoder feels assistive, not invasive.
+  // Calls /api/vin/decode and AUTO-applies the result to any empty fields
+  // immediately. The "Apply" button click is gone — the decoder is faster
+  // now, but we preserve the "never overwrite a manual edit" rule: only
+  // fields the seller hasn't touched get filled. The banner shows what
+  // happened rather than what could happen.
   async function decodeVinNow() {
     const vin = (getValues("vin") ?? "").trim();
     if (vin.length < 11 || vin.length > 20) {
@@ -290,12 +292,23 @@ export default function PublicListingPage() {
         setDecodeError(json?.error ?? "VIN decoder unavailable. You can still fill in the fields manually.");
         return;
       }
-      const result = { decoded: !!json.decoded, source: String(json.source ?? "manual"), fields: (json.fields ?? {}) as DecodedVehicle };
-      setDecode(result);
+      const result = {
+        decoded: !!json.decoded,
+        source:  String(json.source ?? "manual"),
+        fields:  (json.fields ?? {}) as DecodedVehicle,
+      };
       trackEvent("vin_decode_succeeded", {
-        source:         result.source,
-        matchedFields:  Object.keys(result.fields),
+        source:        result.source,
+        matchedFields: Object.keys(result.fields),
       });
+
+      // On a successful match: auto-apply right away. The seller sees the
+      // result in the form fields below the VIN immediately.
+      const applied = result.decoded ? applyToEmptyFields(result.fields) : [];
+      setDecode({ ...result, applied });
+      if (applied.length > 0) {
+        trackEvent("vin_decode_applied", { appliedFields: applied });
+      }
     } catch {
       setDecodeError("Couldn't reach the VIN decoder. Check your connection and try again.");
     } finally {
@@ -303,19 +316,24 @@ export default function PublicListingPage() {
     }
   }
 
-  // Apply only to fields the seller has NOT already filled in. We never
-  // overwrite a manual edit — the decoder is a starting point, not the
-  // source of truth.
-  function applyDecodedFields() {
-    if (!decode) return;
-    const f = decode.fields;
+  // Pure helper: writes decoded values into any empty form fields and
+  // returns the list of field names that were actually filled. Never
+  // overwrites a manual edit. Auto-opens the Technical specifications
+  // panel if a spec was applied.
+  function applyToEmptyFields(f: DecodedVehicle): string[] {
     const applied: string[] = [];
     const currentSpecs = getValues("specifications") ?? {};
 
+    // "Overwritable" = field is empty OR has a form default the user hasn't
+    // touched. react-hook-form's dirtyFields tells us which fields have been
+    // modified since the form's defaultValues. A non-dirty field is still
+    // showing whatever default we picked — fair game for the decoder.
     const setIfEmpty = (name: keyof FormData, value: unknown) => {
       if (value == null || value === "") return;
       const current = getValues(name);
-      if (current == null || current === "" || (typeof current === "number" && Number.isNaN(current))) {
+      const empty   = current == null || current === "" || (typeof current === "number" && Number.isNaN(current));
+      const touched = !!dirtyFields[name as keyof typeof dirtyFields];
+      if (empty || !touched) {
         setValue(name, value as never, { shouldDirty: true, shouldValidate: true });
         applied.push(name as string);
       }
@@ -330,20 +348,17 @@ export default function PublicListingPage() {
     setIfEmpty("transmission", f.transmission);
     setIfEmpty("drivetrain",   f.drivetrain);
 
-    // Spec-fields go inside the nested object — handle manually to avoid
-    // clobbering siblings the seller may have already filled.
+    // Nested specifications — handle by-key so we don't clobber siblings.
     const nextSpecs = { ...currentSpecs };
-    if (f.engineCc   != null && (currentSpecs.engineCc   == null || currentSpecs.engineCc   === ("" as unknown as number))) { nextSpecs.engineCc   = f.engineCc;   applied.push("specifications.engineCc"); }
-    if (f.horsepower != null && (currentSpecs.horsepower == null || currentSpecs.horsepower === ("" as unknown as number))) { nextSpecs.horsepower = f.horsepower; applied.push("specifications.horsepower"); }
+    const isEmpty = (v: unknown) => v == null || v === "";
+    if (f.engineCc   != null && isEmpty(currentSpecs.engineCc))   { nextSpecs.engineCc   = f.engineCc;   applied.push("specifications.engineCc"); }
+    if (f.horsepower != null && isEmpty(currentSpecs.horsepower)) { nextSpecs.horsepower = f.horsepower; applied.push("specifications.horsepower"); }
     if (applied.some((a) => a.startsWith("specifications."))) {
       setValue("specifications", nextSpecs, { shouldDirty: true, shouldValidate: true });
-      // Auto-open the spec panel so the seller sees what got applied.
       setTechOpen(true);
     }
 
-    trackEvent("vin_decode_applied", { appliedFields: applied });
-    // Dismiss the banner so the seller can keep editing without distraction.
-    setDecode(null);
+    return applied;
   }
 
   function toggleFeature(f: string) {
@@ -609,7 +624,8 @@ export default function PublicListingPage() {
                       </div>
                     )}
 
-                    {/* Match banner — preview + Apply */}
+                    {/* Match banner — confirmation of what was auto-filled.
+                        We've already mutated the form by the time this renders. */}
                     {decode && decode.decoded && (
                       <div className="mt-3 rounded-xl border border-accent/30 bg-accent-soft/40 p-3 sm:p-4">
                         <div className="flex items-start gap-3">
@@ -617,12 +633,26 @@ export default function PublicListingPage() {
                             <CheckCircle2 className="h-4 w-4" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold uppercase tracking-widest text-accent">VIN matched</p>
+                            <p className="text-xs font-semibold uppercase tracking-widest text-accent">
+                              {decode.applied.length > 0
+                                ? `${decode.applied.length} field${decode.applied.length === 1 ? "" : "s"} filled from your VIN`
+                                : "VIN matched"}
+                            </p>
                             <p className="text-sm font-display font-medium mt-0.5 tracking-tight">
                               {[decode.fields.year, decode.fields.make, decode.fields.model].filter(Boolean).join(" ") || "Unknown vehicle"}
                               {decode.fields.trim && <span className="text-muted font-normal ml-1.5">· {decode.fields.trim}</span>}
                             </p>
                             <DecodedFactList fields={decode.fields} />
+                            {decode.applied.length > 0 && (
+                              <p className="mt-2 text-[11px] text-muted leading-relaxed">
+                                Filled: {decode.applied.map(prettyFieldName).join(" · ")}. Review and edit anything that doesn't match.
+                              </p>
+                            )}
+                            {decode.applied.length === 0 && (
+                              <p className="mt-2 text-[11px] text-muted leading-relaxed">
+                                You'd already filled these fields manually — we didn't overwrite anything.
+                              </p>
+                            )}
                           </div>
                           <button
                             type="button"
@@ -632,18 +662,6 @@ export default function PublicListingPage() {
                           >
                             <X className="h-3.5 w-3.5" />
                           </button>
-                        </div>
-                        <div className="mt-3 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={applyDecodedFields}
-                            className="h-9 px-4 rounded-full bg-accent text-white text-xs font-semibold uppercase tracking-widest hover:opacity-90 transition-opacity"
-                          >
-                            Apply to empty fields
-                          </button>
-                          <span className="text-[11px] text-muted leading-relaxed">
-                            We won't overwrite anything you've already filled in.
-                          </span>
                         </div>
                       </div>
                     )}
@@ -1429,6 +1447,20 @@ function selectCls(hasError: boolean) {
 }
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Human-readable name for form-field paths in the VIN-applied confirmation.
+// Falls back to the raw path if we don't have a label yet — better to be
+// honest about an unknown key than silently swallow it.
+function prettyFieldName(path: string): string {
+  const map: Record<string, string> = {
+    year: "Year", make: "Make", model: "Model", trim: "Trim",
+    bodyType: "Body type", fuel: "Fuel", transmission: "Transmission",
+    drivetrain: "Drivetrain",
+    "specifications.engineCc":   "Engine cc",
+    "specifications.horsepower": "Horsepower",
+  };
+  return map[path] ?? path;
 }
 
 /**
