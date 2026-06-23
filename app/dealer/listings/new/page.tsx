@@ -37,6 +37,11 @@ const schema = z.object({
   serviceHistoryAvailable:  z.boolean().default(false),
   ownershipVerified:        z.boolean().default(false),
   inspectionAvailable:      z.boolean().default(false),
+  // 2026-06-22 trust fields — fraud-prevention + buyer-trust signals.
+  registrationNumber:       z.preprocess((v) => v === "" ? undefined : v, z.string().min(4).max(15).optional()),
+  mileageVerified:          z.boolean().default(false),
+  logbookVerified:          z.boolean().default(false),
+  accidentHistory:          z.preprocess((v) => v === "" ? undefined : v, z.enum(["none","minor_repaired","major_repaired","unknown"]).optional()),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -373,13 +378,59 @@ export default function NewListingPage() {
           title="Verification & trust"
           description="Optional. Filled-in trust fields earn Agnora's trust badges and surface in buyer search filters."
         >
-          <Field label="VIN / chassis number" error={errors.vin?.message as string | undefined}>
-            <input
-              {...register("vin")}
-              placeholder="17-character VIN or chassis number"
-              className={inputCls(!!errors.vin)}
-              maxLength={20}
-            />
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field label="VIN / chassis number" error={errors.vin?.message as string | undefined}>
+              <input
+                {...register("vin")}
+                placeholder="17-character VIN or chassis number"
+                className={inputCls(!!errors.vin)}
+                maxLength={20}
+              />
+            </Field>
+
+            <Field
+              label="Registration number"
+              error={errors.registrationNumber?.message as string | undefined}
+            >
+              <input
+                {...register("registrationNumber")}
+                placeholder="e.g. KDM 123A"
+                className={inputCls(!!errors.registrationNumber)}
+                maxLength={15}
+              />
+              <p className="mt-1 text-[10px] text-muted">
+                Private — never shown on the public listing. Used for duplicate detection &amp; fraud prevention.
+              </p>
+            </Field>
+          </div>
+
+          {/* Accident history — honest radio. "None" gets a positive badge on
+              the listing; anything repaired shows a transparent indicator. */}
+          <Field label="Accident history">
+            <div className="grid sm:grid-cols-2 gap-2 mt-1">
+              {[
+                { value: "none",            label: "No known accidents",        hint: "Earns the \"Accident-free\" badge on the listing." },
+                { value: "minor_repaired",  label: "Minor accident repaired",   hint: "Cosmetic or non-structural damage repaired." },
+                { value: "major_repaired",  label: "Major accident repaired",   hint: "Structural / frame work was carried out." },
+                { value: "unknown",         label: "Unknown / not declared",    hint: "Selected if you can't confirm the history." },
+              ].map(({ value, label, hint }) => (
+                <label
+                  key={value}
+                  className="flex items-start gap-2.5 rounded-xl border border-border bg-surface-2 px-3 py-2.5 cursor-pointer hover:border-accent/40 transition-colors"
+                >
+                  <input
+                    type="radio"
+                    value={value}
+                    {...register("accidentHistory")}
+                    className="mt-1 h-4 w-4 accent-accent shrink-0"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">{label}</span>
+                    <span className="block text-[11px] text-muted leading-snug">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
           </Field>
 
           <div className="space-y-2.5 mt-3">
@@ -389,6 +440,22 @@ export default function NewListingPage() {
               <div>
                 <p className="text-sm font-medium">VIN verified by Agnora</p>
                 <p className="text-xs text-muted">Tick only after Agnora staff confirms the VIN matches the logbook.</p>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" {...register("mileageVerified")}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-accent cursor-pointer" />
+              <div>
+                <p className="text-sm font-medium">Mileage verified</p>
+                <p className="text-xs text-muted">Odometer cross-checked against service records or auction sheet.</p>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input type="checkbox" {...register("logbookVerified")}
+                className="mt-0.5 h-4 w-4 rounded border-border accent-accent cursor-pointer" />
+              <div>
+                <p className="text-sm font-medium">Logbook verified</p>
+                <p className="text-xs text-muted">Original logbook sighted and matches the registration number above.</p>
               </div>
             </label>
             <label className="flex items-start gap-3 cursor-pointer">

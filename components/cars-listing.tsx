@@ -121,10 +121,12 @@ function CarsListingInner({ initial }: Props) {
   const [sidebarOpen, setSidebarOpen]     = useState(false);
   const [saveToast, setSaveToast]         = useState(false);
   const [showWishlist, setShowWishlist]   = useState(false);
-  const [priceMin, setPriceMin]           = useState(() => params.get("min_price") ?? "");
-  const [priceMax, setPriceMax]           = useState(() => params.get("max_price") ?? "");
-  const [yearMin,  setYearMin]            = useState(() => params.get("min_year")  ?? "");
-  const [yearMax,  setYearMax]            = useState(() => params.get("max_year")  ?? "");
+  const [priceMin, setPriceMin]           = useState(() => params.get("min_price")   ?? "");
+  const [priceMax, setPriceMax]           = useState(() => params.get("max_price")   ?? "");
+  const [yearMin,  setYearMin]            = useState(() => params.get("min_year")    ?? "");
+  const [yearMax,  setYearMax]            = useState(() => params.get("max_year")    ?? "");
+  const [mileageMin, setMileageMin]       = useState(() => params.get("min_mileage") ?? "");
+  const [mileageMax, setMileageMax]       = useState(() => params.get("max_mileage") ?? "");
   const [localQ, setLocalQ]               = useState(() => params.get("q") ?? "");
   const [localModel, setLocalModel]       = useState(() => params.get("smodel") ?? "");
 
@@ -150,6 +152,35 @@ function CarsListingInner({ initial }: Props) {
   const hirePurchase      = get("hire_purchase") === "1";
   const radiusKm          = Number(get("radius") || "0");
   const radiusUsable      = selectedLocations.length === 1;
+  const trustVerified         = get("verified")           === "1";
+  const trustInspection       = get("trust_inspection")   === "1";
+  const trustService          = get("trust_service")      === "1";
+  const trustOwnership        = get("trust_ownership")    === "1";
+  const trustVin              = get("trust_vin")          === "1";
+  const trustBelowMarket      = get("trust_below_market") === "1";
+  const trustMileageVerified  = get("trust_mileage")      === "1";
+  const trustLogbookVerified  = get("trust_logbook")      === "1";
+  const selectedAccidents     = getAll("accident_history");
+  const accidentFreeOnly      = selectedAccidents.includes("none") && selectedAccidents.length === 1;
+
+  // Quick vs Advanced filter split — Tier 1 quick filters always visible,
+  // Tier 2 collapsed behind a toggle. Auto-open when any advanced filter
+  // is already active so users always see what's in effect.
+  const hasAdvancedActive =
+    selectedDrives.length  > 0 ||
+    selectedColors.length  > 0 ||
+    selectedSellers.length > 0 ||
+    (radiusKm > 0 && radiusUsable) ||
+    financing || hirePurchase ||
+    trustVerified || trustInspection || trustService ||
+    trustOwnership || trustVin || trustBelowMarket ||
+    trustMileageVerified || trustLogbookVerified ||
+    selectedAccidents.length > 0;
+
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(hasAdvancedActive);
+  useEffect(() => {
+    if (hasAdvancedActive) setAdvancedOpen(true);
+  }, [hasAdvancedActive]);
 
   // Sync local text inputs → URL (debounced).
   useEffect(() => {
@@ -244,6 +275,14 @@ function CarsListingInner({ initial }: Props) {
     router.push(`?${next}`, { scroll: false });
   }
 
+  function applyMileageRange() {
+    const next = new URLSearchParams(params.toString());
+    if (mileageMin) next.set("min_mileage", mileageMin); else next.delete("min_mileage");
+    if (mileageMax) next.set("max_mileage", mileageMax); else next.delete("max_mileage");
+    next.delete("page");
+    router.push(`?${next}`, { scroll: false });
+  }
+
   function clearAll() {
     setLocalQ("");
     setLocalModel("");
@@ -251,6 +290,8 @@ function CarsListingInner({ initial }: Props) {
     setPriceMax("");
     setYearMin("");
     setYearMax("");
+    setMileageMin("");
+    setMileageMax("");
     router.push("/cars", { scroll: false });
   }
 
@@ -286,6 +327,12 @@ function CarsListingInner({ initial }: Props) {
           clear: () => { setParam("min_year", null); setParam("max_year", null); setYearMin(""); setYearMax(""); },
         }]
       : []),
+    ...(get("min_mileage") || get("max_mileage")
+      ? [{
+          label: `Mileage ${get("min_mileage") ? Number(get("min_mileage")).toLocaleString() : "0"} – ${get("max_mileage") ? Number(get("max_mileage")).toLocaleString() + " km" : "any"}`,
+          clear: () => { setParam("min_mileage", null); setParam("max_mileage", null); setMileageMin(""); setMileageMax(""); },
+        }]
+      : []),
     ...(radiusKm > 0 && radiusUsable
       ? [{
           label: `Within ${radiusKm} km of ${selectedLocations[0]}`,
@@ -299,6 +346,9 @@ function CarsListingInner({ initial }: Props) {
     ...(get("trust_service")      === "1" ? [{ label: "Service history",        clear: () => setParam("trust_service",      null) }] : []),
     ...(get("trust_ownership")    === "1" ? [{ label: "Ownership verified",     clear: () => setParam("trust_ownership",    null) }] : []),
     ...(get("trust_vin")          === "1" ? [{ label: "VIN verified",           clear: () => setParam("trust_vin",          null) }] : []),
+    ...(get("trust_mileage")      === "1" ? [{ label: "Mileage verified",       clear: () => setParam("trust_mileage",      null) }] : []),
+    ...(get("trust_logbook")      === "1" ? [{ label: "Logbook verified",       clear: () => setParam("trust_logbook",      null) }] : []),
+    ...(accidentFreeOnly                  ? [{ label: "Accident-free only",     clear: () => setParam("accident_history",   null) }] : []),
     ...(get("trust_below_market") === "1" ? [{ label: "Below market",           clear: () => setParam("trust_below_market", null) }] : []),
     ...(searchMake ? [{ label: `Make: ${searchMake}`, clear: () => setParam("smake", null) }] : []),
     ...(get("smodel") ? [{ label: `Model: ${get("smodel")}`, clear: () => setParam("smodel", null) }] : []),
@@ -441,6 +491,82 @@ function CarsListingInner({ initial }: Props) {
         onToggle={(l) => toggleMulti("location", l)}
       />
 
+      {/* PR4: Year range */}
+      <FilterSection title="Year">
+        <div className="flex gap-2 items-center">
+          <input type="number" placeholder="From" value={yearMin}
+            onChange={(e) => setYearMin(e.target.value)} aria-label="Earliest year"
+            className="w-full h-9 rounded-xl border border-border bg-surface-2 px-3 text-sm outline-none focus:border-accent placeholder:text-muted" />
+          <span className="text-muted text-xs shrink-0">–</span>
+          <input type="number" placeholder="To" value={yearMax}
+            onChange={(e) => setYearMax(e.target.value)} aria-label="Latest year"
+            className="w-full h-9 rounded-xl border border-border bg-surface-2 px-3 text-sm outline-none focus:border-accent placeholder:text-muted" />
+        </div>
+        <button type="button" onClick={applyYearRange}
+          className="mt-2 w-full h-8 rounded-xl bg-surface-2 border border-border text-xs font-medium hover:bg-surface transition-colors">
+          Apply year range
+        </button>
+      </FilterSection>
+
+      {/* Tier 1: Mileage range — endpoint already accepts min_mileage / max_mileage */}
+      <FilterSection title="Mileage (km)">
+        <div className="flex gap-2 items-center">
+          <input type="number" placeholder="Min" value={mileageMin} min="0"
+            onChange={(e) => setMileageMin(e.target.value)} aria-label="Minimum mileage in km"
+            className="w-full h-9 rounded-xl border border-border bg-surface-2 px-3 text-sm outline-none focus:border-accent placeholder:text-muted" />
+          <span className="text-muted text-xs shrink-0">–</span>
+          <input type="number" placeholder="Max" value={mileageMax} min="0"
+            onChange={(e) => setMileageMax(e.target.value)} aria-label="Maximum mileage in km"
+            className="w-full h-9 rounded-xl border border-border bg-surface-2 px-3 text-sm outline-none focus:border-accent placeholder:text-muted" />
+        </div>
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {[
+            { label: "Under 50k",  min: "",       max: "50000"  },
+            { label: "50–100k",    min: "50000",  max: "100000" },
+            { label: "100–150k",   min: "100000", max: "150000" },
+            { label: "Over 150k",  min: "150000", max: ""       },
+          ].map(({ label, min, max }) => (
+            <button key={label} type="button"
+              onClick={() => {
+                setMileageMin(min); setMileageMax(max);
+                const next = new URLSearchParams(params.toString());
+                if (min) next.set("min_mileage", min); else next.delete("min_mileage");
+                if (max) next.set("max_mileage", max); else next.delete("max_mileage");
+                next.delete("page");
+                router.push(`?${next}`, { scroll: false });
+              }}
+              className={cn(
+                "h-6 rounded-full border px-2.5 text-[11px] font-medium transition-all",
+                (get("min_mileage") === min && get("max_mileage") === max)
+                  ? "border-accent bg-accent-soft text-accent"
+                  : "border-border hover:border-accent/50",
+              )}>{label}</button>
+          ))}
+        </div>
+        <button type="button" onClick={applyMileageRange}
+          className="mt-2 w-full h-8 rounded-xl bg-surface-2 border border-border text-xs font-medium hover:bg-surface transition-colors">
+          Apply mileage range
+        </button>
+      </FilterSection>
+
+      {/* ──────────────────────────────────────────────────────────────────
+          Advanced Filters — Tier 2. Collapsed by default; auto-opens when
+          any of these filters is already active so URLs / shared links
+          can't hide their state from the user.
+      ────────────────────────────────────────────────────────────────── */}
+      <div>
+        <button
+          type="button"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          aria-expanded={advancedOpen ? "true" : "false"}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl border border-border bg-surface-2 text-xs font-semibold uppercase tracking-widest text-muted hover:text-foreground hover:border-accent/50 transition-colors"
+        >
+          <span>Advanced filters</span>
+          <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", advancedOpen && "rotate-180")} />
+        </button>
+      </div>
+
+      {advancedOpen && <>
       {/* PR5: Radius — enabled only with exactly one location selected */}
       <FilterSection title="Radius">
         {!radiusUsable && (
@@ -469,23 +595,6 @@ function CarsListingInner({ initial }: Props) {
             );
           })}
         </div>
-      </FilterSection>
-
-      {/* PR4: Year range */}
-      <FilterSection title="Year">
-        <div className="flex gap-2 items-center">
-          <input type="number" placeholder="From" value={yearMin}
-            onChange={(e) => setYearMin(e.target.value)} aria-label="Earliest year"
-            className="w-full h-9 rounded-xl border border-border bg-surface-2 px-3 text-sm outline-none focus:border-accent placeholder:text-muted" />
-          <span className="text-muted text-xs shrink-0">–</span>
-          <input type="number" placeholder="To" value={yearMax}
-            onChange={(e) => setYearMax(e.target.value)} aria-label="Latest year"
-            className="w-full h-9 rounded-xl border border-border bg-surface-2 px-3 text-sm outline-none focus:border-accent placeholder:text-muted" />
-        </div>
-        <button type="button" onClick={applyYearRange}
-          className="mt-2 w-full h-8 rounded-xl bg-surface-2 border border-border text-xs font-medium hover:bg-surface transition-colors">
-          Apply year range
-        </button>
       </FilterSection>
 
       {/* PR4: Drivetrain pills */}
@@ -568,6 +677,33 @@ function CarsListingInner({ initial }: Props) {
           onToggle={() => setParam("trust_vin", get("trust_vin") === "1" ? null : "1")}
         />
         <TrustCheckbox
+          label="Mileage verified"
+          active={get("trust_mileage") === "1"}
+          onToggle={() => setParam("trust_mileage", get("trust_mileage") === "1" ? null : "1")}
+          subLabel="Odometer cross-checked"
+        />
+        <TrustCheckbox
+          label="Logbook verified"
+          active={get("trust_logbook") === "1"}
+          onToggle={() => setParam("trust_logbook", get("trust_logbook") === "1" ? null : "1")}
+          subLabel="Original logbook sighted"
+        />
+        <TrustCheckbox
+          label="Accident-free only"
+          active={getAll("accident_history").includes("none")}
+          onToggle={() => {
+            const next = new URLSearchParams(params.toString());
+            next.delete("accident_history");
+            // Toggle: only "none" means accident-free filter on.
+            if (!getAll("accident_history").includes("none")) {
+              next.append("accident_history", "none");
+            }
+            next.delete("page");
+            router.push(`?${next}`, { scroll: false });
+          }}
+          subLabel="Dealer declared no accidents"
+        />
+        <TrustCheckbox
           label="Price below market"
           active={get("trust_below_market") === "1"}
           onToggle={() => setParam("trust_below_market", get("trust_below_market") === "1" ? null : "1")}
@@ -591,6 +727,7 @@ function CarsListingInner({ initial }: Props) {
           <span className="text-sm group-hover:text-foreground transition-colors">Hire purchase</span>
         </label>
       </FilterSection>
+      </>}
 
       {activeFilters.length > 0 && (
         <button type="button" onClick={clearAll}

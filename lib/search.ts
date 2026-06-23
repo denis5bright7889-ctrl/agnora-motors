@@ -50,6 +50,10 @@ export interface SearchFilters {
   trustOwnership?:      boolean;
   trustVin?:            boolean;
   trustBelowMarket?:    boolean;
+  // 2026-06-22 trust fields.
+  trustMileageVerified?: boolean;
+  trustLogbookVerified?: boolean;
+  accidentHistories?:    string[]; // ANY-OF semantics; UI exposes "Accident-free only"
   sort?: SortKey;
   page?: number;
   limit?: number;
@@ -144,6 +148,10 @@ export function parseSearchParams(sp: URLSearchParams): SearchFilters {
     trustOwnership:   bool("trust_ownership"),
     trustVin:         bool("trust_vin"),
     trustBelowMarket: bool("trust_below_market"),
+    // 2026-06-22
+    trustMileageVerified: bool("trust_mileage"),
+    trustLogbookVerified: bool("trust_logbook"),
+    accidentHistories:    list("accident_history"),
     sort:           (sp.get("sort") as SortKey) || "newest",
     page,
     limit,
@@ -216,6 +224,10 @@ function applyFilters(cars: Car[], f: SearchFilters, exclude?: ExcludeDim): Car[
     if (f.trustService    && !c.serviceHistoryAvailable)    return false;
     if (f.trustOwnership  && !c.ownershipVerified)          return false;
     if (f.trustVin        && !c.vinVerified)                return false;
+    // 2026-06-22 trust fields.
+    if (f.trustMileageVerified && !c.mileageVerified)       return false;
+    if (f.trustLogbookVerified && !c.logbookVerified)       return false;
+    if (f.accidentHistories?.length && (!c.accidentHistory || !f.accidentHistories.includes(c.accidentHistory))) return false;
     if (f.financing    && !c.financingAvailable) return false;
     if (f.hirePurchase && !c.hirePurchaseAvailable) return false;
     if (f.verifiedOnly && !c.verified) return false;

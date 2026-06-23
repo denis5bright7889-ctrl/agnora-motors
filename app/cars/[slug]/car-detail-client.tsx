@@ -691,23 +691,45 @@ function ContactModal({ car, onClose }: { car: any; onClose: () => void }) {
 // PR7: compact verification badge row. Each badge is render-only when the
 // underlying flag is true — no badge = no claim. "Verified dealer" comes
 // from the existing top-level `verified` flag; the rest from PR6 columns.
+// Accident-history badge is honest: "Accident-free" only when explicitly
+// declared 'none'; "minor repaired" / "major repaired" surface as amber
+// indicators rather than being hidden.
 function TrustBadges({ car }: { car: CarType }) {
-  const badges = [
-    { active: car.verified,                 label: "Verified dealer",  icon: Shield },
-    { active: car.vinVerified,              label: "VIN verified",     icon: Check  },
-    { active: car.inspectionAvailable,      label: "Inspection ready", icon: Check  },
-    { active: car.serviceHistoryAvailable,  label: "Service history",  icon: Check  },
-    { active: car.ownershipVerified,        label: "Ownership OK",     icon: Check  },
+  // accidentHistory needs a small derivation because we render *different*
+  // labels with *different* tones depending on the value. tone "positive"
+  // = emerald (good news); "neutral" = amber (honest disclosure).
+  const accidentBadge =
+    car.accidentHistory === "none"
+      ? { label: "Accident-free",  icon: Check,          tone: "positive" }
+      : car.accidentHistory === "minor_repaired"
+      ? { label: "Minor repaired", icon: AlertTriangle,  tone: "neutral"  }
+      : car.accidentHistory === "major_repaired"
+      ? { label: "Major repaired", icon: AlertTriangle,  tone: "neutral"  }
+      : null; // "unknown" / undefined → no badge (don't mislead with absence)
+
+  const baseBadges = [
+    { active: !!car.verified,                label: "Verified dealer",  icon: Shield, tone: "positive" },
+    { active: !!car.vinVerified,             label: "VIN verified",     icon: Check,  tone: "positive" },
+    { active: !!car.mileageVerified,         label: "Mileage verified", icon: Check,  tone: "positive" },
+    { active: !!car.logbookVerified,         label: "Logbook verified", icon: Check,  tone: "positive" },
+    { active: !!car.inspectionAvailable,     label: "Inspection ready", icon: Check,  tone: "positive" },
+    { active: !!car.serviceHistoryAvailable, label: "Service history",  icon: Check,  tone: "positive" },
+    { active: !!car.ownershipVerified,       label: "Ownership OK",     icon: Check,  tone: "positive" },
   ].filter((b) => b.active);
 
+  const badges = accidentBadge ? [...baseBadges, { active: true, ...accidentBadge }] : baseBadges;
   if (badges.length === 0) return null;
+
+  const toneClass = (tone: string) => tone === "positive"
+    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+    : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
 
   return (
     <div className="mt-2 flex flex-wrap gap-1.5">
-      {badges.map(({ label, icon: Icon }) => (
+      {badges.map(({ label, icon: Icon, tone }) => (
         <span
           key={label}
-          className="inline-flex items-center gap-1 rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300"
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${toneClass(tone)}`}
         >
           <Icon className="h-3 w-3" />
           {label}

@@ -117,6 +117,13 @@ const createSchema = z.object({
   serviceHistoryAvailable: z.boolean().optional(),
   ownershipVerified:       z.boolean().optional(),
   inspectionAvailable:     z.boolean().optional(),
+  // 2026-06-22 trust fields.
+  // registrationNumber: 6–15 chars, server normalises whitespace. Stored as
+  // private — never returned by public endpoints.
+  registrationNumber:      z.string().min(4).max(15).optional(),
+  mileageVerified:         z.boolean().optional(),
+  logbookVerified:         z.boolean().optional(),
+  accidentHistory:         z.enum(["none","minor_repaired","major_repaired","unknown"]).optional(),
   // Canonical Specifications shape (lib/types). Every numeric field is
   // independently optional + range-clamped here, so the JSONB can never
   // grow weird strings or out-of-range numbers from a malformed client.

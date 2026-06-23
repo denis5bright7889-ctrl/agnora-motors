@@ -428,8 +428,9 @@ export async function createDealerCar(
         drivetrain, engine_size_l, previous_owners, exterior_color, interior_color, seller_type,
         latitude, longitude, status,
         vin, vin_verified, service_history_available, ownership_verified, inspection_available,
-        specifications)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb)
+        specifications,
+        registration_number, mileage_verified, logbook_verified, accident_history)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34,$35,$36,$37)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -444,6 +445,10 @@ export async function createDealerCar(
        interior_color   AS "interiorColor",
        seller_type      AS "sellerType",
        specifications,
+       registration_number AS "registrationNumber",
+       mileage_verified    AS "mileageVerified",
+       logbook_verified    AS "logbookVerified",
+       accident_history    AS "accidentHistory",
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       dealerId, slug, data.year, data.make, data.model, data.trim ?? null,
@@ -467,6 +472,10 @@ export async function createDealerCar(
       data.ownershipVerified       ?? false,
       data.inspectionAvailable     ?? false,
       specsJson,
+      data.registrationNumber?.trim() || null,
+      data.mileageVerified ?? false,
+      data.logbookVerified ?? false,
+      data.accidentHistory ?? null,
     ],
   );
   return rows[0];
@@ -520,8 +529,9 @@ export async function createPublicCar(
         drivetrain, engine_size_l, previous_owners, exterior_color, interior_color, seller_type,
         latitude, longitude,
         vin, vin_verified, service_history_available, ownership_verified, inspection_available,
-        specifications)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb)
+        specifications,
+        registration_number, mileage_verified, logbook_verified, accident_history)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34,$35,$36,$37)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -536,6 +546,10 @@ export async function createPublicCar(
        interior_color   AS "interiorColor",
        seller_type      AS "sellerType",
        specifications,
+       registration_number AS "registrationNumber",
+       mileage_verified    AS "mileageVerified",
+       logbook_verified    AS "logbookVerified",
+       accident_history    AS "accidentHistory",
        created_at AS "createdAt", updated_at AS "updatedAt"`,
     [
       slug, data.year, data.make, data.model, data.trim ?? null,
@@ -559,6 +573,10 @@ export async function createPublicCar(
       data.ownershipVerified       ?? false,
       data.inspectionAvailable     ?? false,
       specsJson,
+      data.registrationNumber?.trim() || null,
+      data.mileageVerified ?? false,
+      data.logbookVerified ?? false,
+      data.accidentHistory ?? null,
     ],
   );
   return rows[0];
@@ -783,6 +801,11 @@ export async function updateDealerCar(
     serviceHistoryAvailable: "service_history_available",
     ownershipVerified:       "ownership_verified",
     inspectionAvailable:     "inspection_available",
+    // 2026-06-22 trust fields.
+    registrationNumber:      "registration_number",
+    mileageVerified:         "mileage_verified",
+    logbookVerified:         "logbook_verified",
+    accidentHistory:         "accident_history",
   };
 
   for (const [key, col] of Object.entries(fieldMap)) {
@@ -2122,6 +2145,8 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
     drivetrain: string | null; engineSizeL: number | string | null;
     previousOwners: number | null; exteriorColor: string | null;
     interiorColor: string | null; sellerType: string | null;
+    mileageVerified: boolean | null; logbookVerified: boolean | null;
+    accidentHistory: string | null;
     specifications: Record<string, unknown> | null;
     createdAt: string;
     dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
@@ -2142,6 +2167,9 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
             c.exterior_color   AS "exteriorColor",
             c.interior_color   AS "interiorColor",
             c.seller_type      AS "sellerType",
+            c.mileage_verified AS "mileageVerified",
+            c.logbook_verified AS "logbookVerified",
+            c.accident_history AS "accidentHistory",
             c.specifications,
             c.created_at       AS "createdAt",
             COALESCE(d.business_name, c.seller_name) AS "dealerName",
@@ -2180,6 +2208,9 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
     exteriorColor:  r.exteriorColor  ?? undefined,
     interiorColor:  r.interiorColor  ?? undefined,
     sellerType:     (r.sellerType    ?? undefined) as Car["sellerType"],
+    mileageVerified:         r.mileageVerified         ?? undefined,
+    logbookVerified:         r.logbookVerified         ?? undefined,
+    accidentHistory:         (r.accidentHistory ?? undefined) as Car["accidentHistory"],
     specifications: mergeSpecifications(r.specifications, {
       drivetrain:     r.drivetrain,
       exteriorColor:  r.exteriorColor,
@@ -2245,6 +2276,7 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
     interiorColor: string | null; sellerType: string | null;
     vin: string | null; vinVerified: boolean;
     serviceHistoryAvailable: boolean; ownershipVerified: boolean; inspectionAvailable: boolean;
+    mileageVerified: boolean; logbookVerified: boolean; accidentHistory: string | null;
     specifications: Record<string, unknown> | null;
     createdAt: string;
     dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
@@ -2270,6 +2302,9 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
             c.service_history_available   AS "serviceHistoryAvailable",
             c.ownership_verified          AS "ownershipVerified",
             c.inspection_available        AS "inspectionAvailable",
+            c.mileage_verified            AS "mileageVerified",
+            c.logbook_verified            AS "logbookVerified",
+            c.accident_history            AS "accidentHistory",
             c.specifications,
             c.created_at       AS "createdAt",
             COALESCE(d.business_name, c.seller_name) AS "dealerName",
@@ -2319,6 +2354,9 @@ export async function getCarBySlug(slug: string): Promise<Car | null> {
     serviceHistoryAvailable: r.serviceHistoryAvailable,
     ownershipVerified:       r.ownershipVerified,
     inspectionAvailable:     r.inspectionAvailable,
+    mileageVerified:         r.mileageVerified,
+    logbookVerified:         r.logbookVerified,
+    accidentHistory:         (r.accidentHistory ?? undefined) as Car["accidentHistory"],
     specifications:          mergeSpecifications(r.specifications, {
       drivetrain:     r.drivetrain,
       exteriorColor:  r.exteriorColor,
@@ -2470,6 +2508,14 @@ function buildSearchWhere(
   if (filters.trustService)    conditions.push("c.service_history_available   = TRUE");
   if (filters.trustOwnership)  conditions.push("c.ownership_verified          = TRUE");
   if (filters.trustVin)        conditions.push("c.vin_verified                = TRUE");
+  // 2026-06-22 trust fields.
+  if (filters.trustMileageVerified) conditions.push("c.mileage_verified            = TRUE");
+  if (filters.trustLogbookVerified) conditions.push("c.logbook_verified            = TRUE");
+  if (filters.accidentHistories?.length) {
+    const i = idx.v++;
+    conditions.push(`c.accident_history = ANY($${i}::text[])`);
+    params.push(filters.accidentHistories);
+  }
   // PR6: trustBelowMarket is NOT added here — it requires per-query handling
   // (LATERAL join in results, correlated subquery in total). Facet queries
   // intentionally skip it to keep aggregation cost bounded.
@@ -2580,6 +2626,9 @@ export async function searchCarsDb(filters: SearchFilters): Promise<SearchRespon
            c.service_history_available AS "serviceHistoryAvailable",
            c.ownership_verified        AS "ownershipVerified",
            c.inspection_available      AS "inspectionAvailable",
+           c.mileage_verified          AS "mileageVerified",
+           c.logbook_verified          AS "logbookVerified",
+           c.accident_history          AS "accidentHistory",
            sim.avg_price              AS "marketAvg",
            sim.sample_count           AS "marketSampleCount",
            CASE
@@ -2639,6 +2688,8 @@ export async function searchCarsDb(filters: SearchFilters): Promise<SearchRespon
     interiorColor: string | null; sellerType: string | null;
     vinVerified: boolean | null; serviceHistoryAvailable: boolean | null;
     ownershipVerified: boolean | null; inspectionAvailable: boolean | null;
+    mileageVerified: boolean | null; logbookVerified: boolean | null;
+    accidentHistory: string | null;
     marketAvg: number | string | null; marketSampleCount: number | null;
     priceTier: string | null;
     createdAt: string;
@@ -2716,6 +2767,9 @@ export async function searchCarsDb(filters: SearchFilters): Promise<SearchRespon
     serviceHistoryAvailable: r.serviceHistoryAvailable ?? undefined,
     ownershipVerified:       r.ownershipVerified       ?? undefined,
     inspectionAvailable:     r.inspectionAvailable     ?? undefined,
+    mileageVerified:         r.mileageVerified         ?? undefined,
+    logbookVerified:         r.logbookVerified         ?? undefined,
+    accidentHistory:         (r.accidentHistory ?? undefined) as Car["accidentHistory"],
     marketAvg:               r.marketAvg         !== null ? Math.round(Number(r.marketAvg)) : undefined,
     marketSampleCount:       r.marketSampleCount ?? undefined,
     priceTier:               (r.priceTier ?? undefined) as Car["priceTier"],

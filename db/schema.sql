@@ -360,6 +360,22 @@ CREATE INDEX IF NOT EXISTS idx_cars_inspection_available ON cars(inspection_avai
 CREATE INDEX IF NOT EXISTS idx_cars_service_history      ON cars(service_history_available) WHERE service_history_available = TRUE;
 CREATE INDEX IF NOT EXISTS idx_cars_ownership_verified   ON cars(ownership_verified)        WHERE ownership_verified        = TRUE;
 
+-- 2026-06-22: trust-focused listing fields (registration #, mileage/logbook
+-- verification, accident history). See db/migrations/2026-06-22-trust-fields.sql
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS registration_number TEXT;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS mileage_verified    BOOLEAN DEFAULT FALSE;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS logbook_verified    BOOLEAN DEFAULT FALSE;
+ALTER TABLE cars ADD COLUMN IF NOT EXISTS accident_history    TEXT;
+ALTER TABLE cars DROP CONSTRAINT IF EXISTS cars_accident_history_chk;
+ALTER TABLE cars ADD CONSTRAINT cars_accident_history_chk
+  CHECK (accident_history IS NULL
+      OR accident_history IN ('none','minor_repaired','major_repaired','unknown'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cars_reg_number_lower
+  ON cars (LOWER(registration_number)) WHERE registration_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_cars_mileage_verified  ON cars(mileage_verified)   WHERE mileage_verified  = TRUE;
+CREATE INDEX IF NOT EXISTS idx_cars_logbook_verified  ON cars(logbook_verified)   WHERE logbook_verified  = TRUE;
+CREATE INDEX IF NOT EXISTS idx_cars_accident_history  ON cars(accident_history)   WHERE accident_history IS NOT NULL;
+
 -- Optional buyer-decision specs (Phase 1: horsepower, torque, engine cc,
 -- seats, fuel economy; Phase 2: battery + range, payload, towing). Stored as
 -- JSONB so we can extend / specialise by body type without per-field

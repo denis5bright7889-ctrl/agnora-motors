@@ -17,6 +17,7 @@ export type PlanId = "free" | "pro" | "premium";
 export type Drivetrain = "fwd" | "rwd" | "awd" | "4wd";
 export type SellerType = "dealer" | "private" | "login_free";
 export type PriceTier  = "great" | "fair" | "above";
+export type AccidentHistory = "none" | "minor_repaired" | "major_repaired" | "unknown";
 export type Upholstery = "cloth" | "leather" | "leatherette" | "alcantara";
 export type SpecificationsSource = "manual" | "vin_decoder" | "dealer_import" | "marketplace_import";
 
@@ -101,6 +102,11 @@ export interface Car {
   serviceHistoryAvailable?: boolean;
   ownershipVerified?: boolean;
   inspectionAvailable?: boolean;
+  // 2026-06-22: public-facing trust signals. registration_number lives on
+  // DealerCar only — never returned by public/search endpoints.
+  mileageVerified?:  boolean;
+  logbookVerified?:  boolean;
+  accidentHistory?:  AccidentHistory;
   marketAvg?: number;            // KSh average of comparable listed cars
   marketSampleCount?: number;    // how many comparables fed the average
   priceTier?: PriceTier;         // "great" | "fair" | "above"
@@ -139,6 +145,15 @@ export interface Brand {
   slug: string;
   count: number;
   topModel?: string;
+  /**
+   * Identifier used to resolve the brand's logo asset.
+   * - If it matches a Simple Icons slug (https://simpleicons.org), the logo
+   *   loads from their CDN: https://cdn.simpleicons.org/{logoSlug}/{color}
+   * - Leave undefined to keep the lettered fallback.
+   * - To self-host instead, swap BrandLogo's URL builder to a local
+   *   path such as /brand-logos/{logoSlug}.svg.
+   */
+  logoSlug?: string;
 }
 
 export interface Make {
@@ -213,6 +228,14 @@ export interface DealerCar {
   serviceHistoryAvailable?: boolean | null;
   ownershipVerified?: boolean | null;
   inspectionAvailable?: boolean | null;
+  // 2026-06-22: trust fields. registrationNumber is PRIVATE — never returned
+  // by any public endpoint. The boolean verifications are public; accident
+  // history is public + honest (shown as either "Accident-free" badge or a
+  // muted "Repaired" indicator).
+  registrationNumber?: string | null;
+  mileageVerified?:    boolean | null;
+  logbookVerified?:    boolean | null;
+  accidentHistory?:    AccidentHistory | null;
   // Buyer-decision specs, JSONB on the cars table. See Specifications type.
   specifications?: Specifications | null;
   status: CarStatus;
