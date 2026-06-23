@@ -157,7 +157,6 @@ function CarsListingInner({ initial }: Props) {
   const trustService          = get("trust_service")      === "1";
   const trustOwnership        = get("trust_ownership")    === "1";
   const trustVin              = get("trust_vin")          === "1";
-  const trustBelowMarket      = get("trust_below_market") === "1";
   const trustMileageVerified  = get("trust_mileage")      === "1";
   const trustLogbookVerified  = get("trust_logbook")      === "1";
   const selectedAccidents     = getAll("accident_history");
@@ -173,7 +172,7 @@ function CarsListingInner({ initial }: Props) {
     (radiusKm > 0 && radiusUsable) ||
     financing || hirePurchase ||
     trustVerified || trustInspection || trustService ||
-    trustOwnership || trustVin || trustBelowMarket ||
+    trustOwnership || trustVin ||
     trustMileageVerified || trustLogbookVerified ||
     selectedAccidents.length > 0;
 
@@ -349,7 +348,6 @@ function CarsListingInner({ initial }: Props) {
     ...(get("trust_mileage")      === "1" ? [{ label: "Mileage verified",       clear: () => setParam("trust_mileage",      null) }] : []),
     ...(get("trust_logbook")      === "1" ? [{ label: "Logbook verified",       clear: () => setParam("trust_logbook",      null) }] : []),
     ...(accidentFreeOnly                  ? [{ label: "Accident-free only",     clear: () => setParam("accident_history",   null) }] : []),
-    ...(get("trust_below_market") === "1" ? [{ label: "Below market",           clear: () => setParam("trust_below_market", null) }] : []),
     ...(searchMake ? [{ label: `Make: ${searchMake}`, clear: () => setParam("smake", null) }] : []),
     ...(get("smodel") ? [{ label: `Model: ${get("smodel")}`, clear: () => setParam("smodel", null) }] : []),
   ];
@@ -702,12 +700,6 @@ function CarsListingInner({ initial }: Props) {
             router.push(`?${next}`, { scroll: false });
           }}
           subLabel="Dealer declared no accidents"
-        />
-        <TrustCheckbox
-          label="Price below market"
-          active={get("trust_below_market") === "1"}
-          onToggle={() => setParam("trust_below_market", get("trust_below_market") === "1" ? null : "1")}
-          subLabel="Based on similar listed prices"
         />
       </FilterSection>
 
