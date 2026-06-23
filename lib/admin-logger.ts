@@ -24,6 +24,7 @@ export type AdminAction =
   | "listing_approve"
   | "listing_reject"
   | "listing_mark_sold"
+  | "listing_auto_hide"
   | "content_approve"
   | "content_reject"
   | "content_delete";

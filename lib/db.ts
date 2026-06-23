@@ -963,6 +963,50 @@ export async function adminDeleteCar(carId: string): Promise<void> {
   await query("DELETE FROM cars WHERE id = $1", [carId]);
 }
 
+// Finds active listings sharing a VIN with another non-archived listing.
+// The *newer* car in each pair is returned as the duplicate (oldest wins —
+// usually the legitimate first listing). VIN comparison is case-insensitive
+// and trimmed; null/short VINs are skipped (those failures get caught by
+// getNonCompliantListings instead).
+export interface DuplicateVin {
+  id: string;
+  slug: string;
+  vin: string;
+  year: number;
+  make: string;
+  model: string;
+  dealerId: string | null;
+  createdAt: string;
+  originalId: string;        // The older listing kept active
+  originalCreatedAt: string;
+}
+
+export async function findDuplicateVins(limit = 200): Promise<DuplicateVin[]> {
+  const rows = await query<DuplicateVin>(
+    `WITH ranked AS (
+       SELECT id, slug, UPPER(TRIM(vin)) AS vin, year, make, model,
+              dealer_id AS "dealerId", created_at AS "createdAt",
+              ROW_NUMBER() OVER (
+                PARTITION BY UPPER(TRIM(vin)) ORDER BY created_at ASC
+              ) AS rn,
+              FIRST_VALUE(id)         OVER (PARTITION BY UPPER(TRIM(vin)) ORDER BY created_at ASC) AS "originalId",
+              FIRST_VALUE(created_at) OVER (PARTITION BY UPPER(TRIM(vin)) ORDER BY created_at ASC) AS "originalCreatedAt"
+       FROM cars
+       WHERE status = 'active'
+         AND vin IS NOT NULL
+         AND LENGTH(TRIM(vin)) >= $1
+     )
+     SELECT id, slug, vin, year, make, model, "dealerId", "createdAt",
+            "originalId", "originalCreatedAt"
+     FROM ranked
+     WHERE rn > 1
+     ORDER BY "createdAt" DESC
+     LIMIT $2`,
+    [MIN_VIN_LEN, limit],
+  );
+  return rows;
+}
+
 // Loads any car by id regardless of status — used by admin moderation endpoints
 // that must operate on hidden / archived rows the public visibility helper hides.
 export async function getCarByIdAdmin(carId: string): Promise<DealerCar | null> {
