@@ -11,6 +11,15 @@ import type { Dealer } from "@/types";
 
 type Status = "all" | "pending" | "approved" | "rejected";
 
+function strikeTooltip(recent: number, lifetime: number, suspensionReason: string | null | undefined): string {
+  const parts = [
+    `${recent} strike(s) in the rolling 30-day window`,
+    `Lifetime total: ${lifetime}`,
+  ];
+  if (suspensionReason) parts.push(`Last reason: ${suspensionReason}`);
+  return parts.join(". ") + ".";
+}
+
 export default function AdminDealersPage() {
   const [dealers, setDealers] = useState<Dealer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -167,13 +176,13 @@ export default function AdminDealersPage() {
                         <ShieldOff className="h-3 w-3" /> Suspended
                       </span>
                     )}
-                    {(dealer.strikeCount ?? 0) > 0 && (
+                    {(dealer.recentStrikeCount ?? 0) > 0 && (
                       <span
-                        title={dealer.suspensionReason ?? "Strikes from auto-moderation"}
+                        title={strikeTooltip(dealer.recentStrikeCount ?? 0, dealer.strikeCount ?? 0, dealer.suspensionReason)}
                         className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold text-orange-500"
                       >
                         <AlertTriangle className="h-3 w-3" />
-                        {dealer.strikeCount} {dealer.strikeCount === 1 ? "strike" : "strikes"}
+                        {dealer.recentStrikeCount} {dealer.recentStrikeCount === 1 ? "strike" : "strikes"}
                       </span>
                     )}
                   </div>

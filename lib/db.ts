@@ -285,15 +285,31 @@ export async function createUser(data: {
 }
 
 export async function listUsers(): Promise<User[]> {
+  // recentStrikeCount: in-window strikes recorded after the most recent
+  // unsuspension event (so a fresh chance after admin reinstates them).
+  // Window matches STRIKE_WINDOW_DAYS in lib/strikes.ts — change both
+  // together or strikes will decay differently than they enforce.
   return query<User>(
-    `SELECT id, name, email, image, role,
-            is_active        AS "isActive",
-            suspended_at     AS "suspendedAt",
-            suspended_reason AS "suspendedReason",
-            strike_count     AS "strikeCount",
-            last_strike_at   AS "lastStrikeAt",
-            created_at       AS "createdAt"
-     FROM users ORDER BY created_at DESC`,
+    `SELECT u.id, u.name, u.email, u.image, u.role,
+            u.is_active        AS "isActive",
+            u.suspended_at     AS "suspendedAt",
+            u.suspended_reason AS "suspendedReason",
+            u.strike_count     AS "strikeCount",
+            u.last_strike_at   AS "lastStrikeAt",
+            COALESCE((
+              SELECT COUNT(*) FROM admin_logs al
+              WHERE al.target_type = 'user'
+                AND al.target_id   = u.id
+                AND al.action      = 'user_strike'
+                AND al.created_at  > NOW() - INTERVAL '30 days'
+                AND al.created_at  > COALESCE((
+                  SELECT MAX(created_at) FROM admin_logs
+                  WHERE target_type = 'user' AND target_id = u.id
+                    AND action      = 'user_unsuspend'
+                ), '1970-01-01'::timestamptz)
+            ), 0)::INT          AS "recentStrikeCount",
+            u.created_at       AS "createdAt"
+     FROM users u ORDER BY u.created_at DESC`,
   );
 }
 
@@ -371,6 +387,9 @@ export async function getDealerById(id: string): Promise<Dealer | null> {
 export async function listDealers(status?: string): Promise<Dealer[]> {
   const where = status ? "WHERE d.status = $1" : "";
   const params = status ? [status] : [];
+  // recentStrikeCount: see listUsers for the rationale — mirrors the rolling
+  // 30-day window in lib/strikes.ts, but only counts strikes after the
+  // most recent unsuspension event (clean slate after admin reinstates).
   return query<Dealer>(
     `SELECT d.id, d.user_id AS "userId", d.business_name AS "businessName",
             d.business_reg AS "businessReg", d.kra_pin AS "kraPin",
@@ -382,6 +401,18 @@ export async function listDealers(status?: string): Promise<Dealer[]> {
             d.suspension_reason AS "suspensionReason",
             d.strike_count      AS "strikeCount",
             d.last_strike_at    AS "lastStrikeAt",
+            COALESCE((
+              SELECT COUNT(*) FROM admin_logs al
+              WHERE al.target_type = 'dealer'
+                AND al.target_id   = d.id
+                AND al.action      = 'dealer_strike'
+                AND al.created_at  > NOW() - INTERVAL '30 days'
+                AND al.created_at  > COALESCE((
+                  SELECT MAX(created_at) FROM admin_logs
+                  WHERE target_type = 'dealer' AND target_id = d.id
+                    AND action      = 'dealer_unsuspend'
+                ), '1970-01-01'::timestamptz)
+            ), 0)::INT          AS "recentStrikeCount",
             d.created_at AS "createdAt", d.updated_at AS "updatedAt",
             u.name AS "userName", u.email AS "userEmail"
      FROM dealers d JOIN users u ON u.id = d.user_id

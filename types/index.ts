@@ -195,6 +195,11 @@ export interface Dealer {
   suspensionReason?: string | null;
   strikeCount?: number;
   lastStrikeAt?: string | null;
+  // PR2 strike decay: read-time count of strikes within the rolling
+  // enforcement window, after the most recent unsuspension. The chip on
+  // /admin/dealers shows this so admins see what the auto-suspend trigger
+  // actually sees, not a stale lifetime tally.
+  recentStrikeCount?: number;
   createdAt: string;
   updatedAt: string;
   userName?: string;
@@ -274,6 +279,11 @@ export interface User {
   // lastStrikeAt is when the most recent one was recorded.
   strikeCount?: number;
   lastStrikeAt?: string | null;
+  // PR2 strike decay: in-window strike count derived from admin_logs at read
+  // time. Mirrors the 30-day rolling window the auto-suspend trigger uses, so
+  // the admin UI chip and the enforcement engine agree on "how many strikes
+  // count". Resets after every unsuspension event.
+  recentStrikeCount?: number;
   createdAt: string;
 }
 

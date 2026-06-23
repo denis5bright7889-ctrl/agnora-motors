@@ -17,8 +17,18 @@ type UserRow = {
   suspendedAt?: string | null;
   suspendedReason?: string | null;
   strikeCount?: number;
+  recentStrikeCount?: number;
   createdAt: string;
 };
+
+function strikeTooltip(recent: number, lifetime: number, suspendedReason: string | null | undefined): string {
+  const parts = [
+    `${recent} strike(s) in the rolling 30-day window`,
+    `Lifetime total: ${lifetime}`,
+  ];
+  if (suspendedReason) parts.push(`Last reason: ${suspendedReason}`);
+  return parts.join(". ") + ".";
+}
 
 const ROLE_STYLES: Record<string, string> = {
   admin:  "bg-accent-soft text-accent border-accent/20",
@@ -253,13 +263,13 @@ export default function AdminUsersPage() {
                                   <ShieldOff className="h-2.5 w-2.5" /> Suspended
                                 </span>
                               )}
-                              {(user.strikeCount ?? 0) > 0 && (
+                              {(user.recentStrikeCount ?? 0) > 0 && (
                                 <span
-                                  title={user.suspendedReason ?? "Strikes from auto-moderation"}
+                                  title={strikeTooltip(user.recentStrikeCount ?? 0, user.strikeCount ?? 0, user.suspendedReason)}
                                   className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-orange-500"
                                 >
                                   <AlertTriangle className="h-2.5 w-2.5" />
-                                  {user.strikeCount}
+                                  {user.recentStrikeCount}
                                 </span>
                               )}
                             </div>
