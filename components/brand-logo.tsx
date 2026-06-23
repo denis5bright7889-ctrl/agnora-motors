@@ -10,24 +10,24 @@ interface Props {
 }
 
 /**
- * Renders a brand's logo from the Simple Icons public CDN
- * (https://cdn.simpleicons.org). The icons themselves are community-maintained
- * SVGs — trademark rights remain with each brand's owner; usage for
- * identifying products of that brand on a marketplace is standard nominative
- * use.
+ * Resolves a brand's logo in this order:
+ *   1. brand.logoUrl   — explicit asset path (self-hosted SVG under
+ *      /brand-logos/ for marks Simple Icons doesn't carry).
+ *   2. brand.logoSlug  — Simple Icons CDN (https://cdn.simpleicons.org/{slug}).
+ *   3. lettered chip   — first letter of the brand name.
  *
- * If the brand has no logoSlug OR the CDN request fails (404, network
- * error, slug typo), we fall back to a lettered chip so the grid never
- * shows a broken-image icon.
- *
- * To self-host instead: change the `src` to `/brand-logos/${brand.logoSlug}.svg`
- * and drop SVGs into /public/brand-logos/.
+ * Trademark rights remain with each brand's owner; usage for identifying
+ * products of that brand on a marketplace is standard nominative use.
  */
 export function BrandLogo({ brand, className }: Props) {
   const [failed, setFailed] = useState(false);
-  const showImage = brand.logoSlug && !failed;
 
-  if (!showImage) {
+  const src =
+    brand.logoUrl  ? brand.logoUrl :
+    brand.logoSlug ? `https://cdn.simpleicons.org/${brand.logoSlug}` :
+    null;
+
+  if (!src || failed) {
     return (
       <span
         aria-hidden
@@ -44,7 +44,7 @@ export function BrandLogo({ brand, className }: Props) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
-      src={`https://cdn.simpleicons.org/${brand.logoSlug}`}
+      src={src}
       alt=""
       width={36}
       height={36}

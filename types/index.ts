@@ -146,13 +146,13 @@ export interface Brand {
   count: number;
   topModel?: string;
   /**
-   * Identifier used to resolve the brand's logo asset.
-   * - If it matches a Simple Icons slug (https://simpleicons.org), the logo
-   *   loads from their CDN: https://cdn.simpleicons.org/{logoSlug}/{color}
-   * - Leave undefined to keep the lettered fallback.
-   * - To self-host instead, swap BrandLogo's URL builder to a local
-   *   path such as /brand-logos/{logoSlug}.svg.
+   * Logo resolution order (BrandLogo applies them top-down, first match wins):
+   *   1. logoUrl  — explicit asset URL (self-hosted SVG under /brand-logos/,
+   *      or any absolute URL). Use this for brands Simple Icons doesn't carry.
+   *   2. logoSlug — Simple Icons CDN slug: https://cdn.simpleicons.org/{slug}.
+   *   3. lettered fallback — first letter of the brand name.
    */
+  logoUrl?:  string;
   logoSlug?: string;
 }
 
