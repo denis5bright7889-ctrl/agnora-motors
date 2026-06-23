@@ -26,6 +26,8 @@ export const STATIC_NEWS: NewsArticle[] = [
     status: "published",
     featured: true,
     viewCount: 0,
+    impactScore: null,
+    kenyaSummary: null,
     createdAt: "2025-04-18T11:00:00Z",
   },
   {
@@ -49,6 +51,8 @@ export const STATIC_NEWS: NewsArticle[] = [
     status: "published",
     featured: false,
     viewCount: 0,
+    impactScore: null,
+    kenyaSummary: null,
     createdAt: "2025-04-22T07:00:00Z",
   },
   {
@@ -72,6 +76,8 @@ export const STATIC_NEWS: NewsArticle[] = [
     status: "published",
     featured: false,
     viewCount: 0,
+    impactScore: null,
+    kenyaSummary: null,
     createdAt: "2025-04-12T08:30:00Z",
   },
   {
@@ -95,6 +101,8 @@ export const STATIC_NEWS: NewsArticle[] = [
     status: "published",
     featured: false,
     viewCount: 0,
+    impactScore: null,
+    kenyaSummary: null,
     createdAt: "2025-04-25T10:30:00Z",
   },
 ];

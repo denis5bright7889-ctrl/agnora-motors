@@ -50,3 +50,12 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_reason TEXT;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderated_by     TEXT;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderated_at     TIMESTAMPTZ;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderation_reason TEXT;
+
+-- ── 6. News Intelligence Layer (PR1) ─────────────────────────
+-- Each article is augmented post-fetch with a Kenya-impact overlay.
+--   impact_score: deterministic brand+segment lookup ('high' | 'medium' | 'low')
+--   kenya_summary: Haiku 4.5 JSONB { whatHappened, whyGlobal, whyKenya, whatBuyersShouldDo }
+-- Both nullable so existing rows remain valid until the next cron run.
+ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS impact_score  TEXT;
+ALTER TABLE news_articles ADD COLUMN IF NOT EXISTS kenya_summary JSONB;
+CREATE INDEX IF NOT EXISTS idx_news_impact_score ON news_articles(impact_score);

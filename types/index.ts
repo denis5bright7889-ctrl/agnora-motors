@@ -281,6 +281,18 @@ export type NewsStatus = "published" | "pending" | "rejected";
 export type ResearchCategory = "review" | "buying-guide" | "comparison" | "maintenance" | "financing";
 export type ResearchStatus = "draft" | "published";
 
+// Kenya Impact overlay (PR1 News Intelligence). Populated by the ingest
+// cron via lib/news/kenya-transform.ts. Null for articles scored "low"
+// (Haiku call is skipped) and for ingest runs without an API key.
+export interface KenyaSummary {
+  whatHappened:       string;
+  whyGlobal:          string;
+  whyKenya:           string;
+  whatBuyersShouldDo: string;
+}
+
+export type ImpactScore = "high" | "medium" | "low";
+
 export interface NewsArticle {
   id: string;
   title: string;
@@ -300,6 +312,8 @@ export interface NewsArticle {
   status: NewsStatus;
   featured: boolean;
   viewCount: number;
+  impactScore:   ImpactScore | null;
+  kenyaSummary:  KenyaSummary | null;
   createdAt: string;
 }
 

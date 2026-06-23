@@ -1283,6 +1283,8 @@ function mapNewsRow(r: Record<string, unknown>): NewsArticle {
     status:     r.status as NewsArticle["status"],
     featured:   Boolean(r.featured),
     viewCount:  Number(r.view_count ?? 0),
+    impactScore:  (r.impact_score as NewsArticle["impactScore"]) ?? null,
+    kenyaSummary: (r.kenya_summary as NewsArticle["kenyaSummary"]) ?? null,
     createdAt:  r.created_at as string,
   };
 }
@@ -1402,6 +1404,49 @@ export async function getNewsCount(status?: string): Promise<number> {
     [],
   );
   return Number(rows[0]?.count ?? 0);
+}
+
+// PR1 News Intelligence: finds listings on Agnora related to a news article.
+// Strategy: case-insensitive substring match of the article title against
+// cars.make. If two cars share a make we pick the most recent. Uses the
+// public visibility helper so hidden / archived / unqualified listings
+// never surface in editorial context.
+//
+// Falls back to empty array on no match — the UI hides the strip entirely
+// rather than showing irrelevant inventory.
+export async function getRelatedCarsForArticle(opts: {
+  title: string;
+  body?: string | null;
+  limit?: number;
+}): Promise<Car[]> {
+  const { title, body = "", limit = 4 } = opts;
+  const haystack = `${title} ${body ?? ""}`.toLowerCase();
+
+  // Pull the canonical makes table once; match against article text.
+  const makeRows = await query<{ name: string }>(
+    `SELECT DISTINCT make AS name FROM cars WHERE make IS NOT NULL`,
+    [],
+  );
+  const hits = makeRows
+    .map((r) => r.name)
+    .filter((m) => haystack.includes(m.toLowerCase()));
+
+  if (!hits.length) return [];
+
+  const rows = await query<Car>(
+    `SELECT c.id, c.slug, c.year, c.make, c.model, c.trim, c.price,
+            c.mileage, c.fuel, c.transmission, c.body_type AS "bodyType",
+            c.condition, c.location, c.images, c.features, c.verified,
+            c.is_featured AS "isFeatured",
+            c.created_at AS "createdAt"
+     FROM cars c
+     WHERE c.make = ANY($1)
+       AND ${buildPublicListingVisibilityWhere("c")}
+     ORDER BY c.created_at DESC
+     LIMIT $2`,
+    [hits, limit],
+  );
+  return rows;
 }
 
 // ── Research articles ─────────────────────────────────────────────────────────

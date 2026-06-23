@@ -11,8 +11,10 @@ import {
   MapPin,
 } from "lucide-react";
 import type { Metadata } from "next";
-import type { NewsArticle } from "@/types";
+import type { NewsArticle, Car } from "@/types";
 import { cn } from "@/lib/utils";
+import { getRelatedCarsForArticle, isDbConfigured } from "@/lib/db";
+import { KenyaImpactWidget } from "./kenya-impact-widget";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -141,6 +143,16 @@ export default async function NewsArticlePage({
 
   const related = await fetchRelated(article.category, slug, origin);
   const bodyText = article.content ?? article.summary ?? "";
+
+  // Related cars fetched directly server-side — no API round-trip.
+  // Hides itself when DB is empty or no makes match the article text.
+  const relatedCars: Car[] = isDbConfigured()
+    ? await getRelatedCarsForArticle({
+        title: article.title,
+        body:  article.summary ?? article.content ?? "",
+        limit: 4,
+      }).catch(() => [])
+    : [];
   const readTime = readTimeMinutes(bodyText);
   const countryLabel = COUNTRY_LABELS[article.country] ?? article.country;
   const catCls = CATEGORY_COLORS[article.category.toLowerCase()] ?? "bg-surface-2 text-muted";
@@ -279,6 +291,15 @@ export default async function NewsArticlePage({
                   ))}
                 </div>
               )}
+
+              {/* Kenya Impact overlay — the value buyers can't get on Motor1
+                  or Carscoops. Auto-hides when the ingest cron hasn't
+                  populated impactScore / kenyaSummary yet. */}
+              <KenyaImpactWidget
+                impactScore={article.impactScore}
+                kenyaSummary={article.kenyaSummary}
+                relatedCars={relatedCars}
+              />
 
               {/* Article body */}
               {bodyText ? (

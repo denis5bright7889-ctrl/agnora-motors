@@ -3,6 +3,8 @@ import { fetchGNews }     from "./gnews";
 import { fetchRssFeeds }  from "./rss";
 import { hashUrl, hashTitle, slugify, deduplicateRaw } from "./dedup";
 import { enhanceArticle } from "./ai-enhance";
+import { scoreArticle }   from "./impact";
+import { generateKenyaSummary } from "./kenya-transform";
 import { NEWSAPI_QUERIES, GNEWS_QUERIES, RSS_FEEDS, SCOPE_COUNTRY } from "./sources";
 import { query, isDbConfigured } from "@/lib/db";
 import type { RawArticle, NewsScope, PipelineResult } from "./types";
@@ -48,12 +50,22 @@ async function insertArticle(
 
   const slug = slugify(raw.title, raw.publishedAt, urlHash);
 
+  // Kenya Impact Layer (PR1). Deterministic score first — if it's "low" the
+  // transform is skipped, saving the Haiku call. Both failure modes fall
+  // through to NULL so the article still ingests cleanly.
+  const impact = scoreArticle(raw.title, textContent);
+  const kenyaSummary = useAi
+    ? await generateKenyaSummary(raw.title, textContent, impact)
+    : null;
+
   await query(
     `INSERT INTO news_articles
        (title, slug, source, source_url, country, category,
         content, summary, image, url, url_hash, title_hash,
-        published_at, tags, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'published')
+        published_at, tags, status,
+        impact_score, kenya_summary)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'published',
+             $15, $16::jsonb)
      ON CONFLICT (url_hash) DO NOTHING`,
     [
       raw.title,
@@ -70,6 +82,8 @@ async function insertArticle(
       titleHash,
       raw.publishedAt,
       tags,
+      impact.score,
+      kenyaSummary ? JSON.stringify(kenyaSummary) : null,
     ],
   );
   return true;
