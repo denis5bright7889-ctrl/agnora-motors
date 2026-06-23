@@ -15,8 +15,12 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   user_activate:      { label: "User activated",      color: "bg-green-500/15 text-green-400" },
   user_suspend:       { label: "User suspended",      color: "bg-red-500/15 text-red-400" },
   user_unsuspend:     { label: "User unsuspended",    color: "bg-green-500/15 text-green-400" },
+  user_strike:        { label: "User strike",         color: "bg-orange-500/15 text-orange-500" },
   dealer_approve:     { label: "Dealer approved",     color: "bg-green-500/15 text-green-400" },
   dealer_reject:      { label: "Dealer rejected",     color: "bg-red-500/15 text-red-400" },
+  dealer_suspend:     { label: "Dealer suspended",    color: "bg-red-500/15 text-red-400" },
+  dealer_unsuspend:   { label: "Dealer unsuspended",  color: "bg-green-500/15 text-green-400" },
+  dealer_strike:      { label: "Dealer strike",       color: "bg-orange-500/15 text-orange-500" },
   seller_approve:     { label: "Seller approved",     color: "bg-green-500/15 text-green-400" },
   seller_reject:      { label: "Seller rejected",     color: "bg-red-500/15 text-red-400" },
   impersonate_start:  { label: "Impersonation start", color: "bg-amber-500/15 text-amber-400" },
@@ -122,6 +126,7 @@ export default function AdminLogsPage() {
           </div>
         </div>
         <button
+          type="button"
           onClick={() => { setPage(0); void load(); }}
           disabled={loading}
           className="flex items-center gap-2 h-9 px-4 rounded-full border border-border text-sm font-medium hover:bg-surface-2 transition-colors disabled:opacity-50"
@@ -147,6 +152,7 @@ export default function AdminLogsPage() {
           <select
             value={action}
             onChange={(e) => { setAction(e.target.value); setPage(0); }}
+            aria-label="Filter by action type"
             className="h-10 rounded-xl border border-border bg-surface-2 pl-9 pr-8 text-sm outline-none focus:border-accent transition-colors appearance-none min-w-[180px]"
           >
             <option value="">All actions</option>

@@ -4,27 +4,99 @@ import {
   adminModerateCar,
   logAdminAction,
 } from "@/lib/db";
+import { recordStrike, getCarOwner } from "@/lib/strikes";
 
-// PR4 automated moderation. Runs nightly via a Vercel cron and on demand
-// from /api/cron/auto-moderate-listings. Soft-hides active listings that
-// violate the quality policy or duplicate another listing's VIN — never
-// deletes, never rejects (rejection is reserved for human-final calls
-// because it surfaces a reason to the seller).
+// PR4 automated moderation + PR2 strike accumulation.
+//
+// Runs nightly via a Vercel cron and on demand from
+// /api/cron/auto-moderate-listings. Soft-hides active listings that
+// violate the quality policy or duplicate another listing's VIN, then
+// records a strike against the listing owner. Never deletes, never
+// rejects — rejection is reserved for human-final calls because it
+// surfaces a reason to the seller.
 //
 // Audit trail: every action lands in admin_logs with admin_id = the
 // SYSTEM_ACTOR_ID constant below, so a human admin browsing the log can
-// instantly tell "this was auto-moderation" without checking the diff.
+// instantly tell "this was auto-moderation".
 
 export const SYSTEM_ACTOR_ID    = "system:auto-moderator";
 const         SYSTEM_ACTOR_EMAIL = "system@agnora-motors.com";
 
 export interface AutoModerateResult {
-  scanned:      number;   // active listings considered for hide
-  hiddenPhotos: number;
-  hiddenVin:    number;
-  hiddenDupVin: number;
-  errors:       number;
-  durationMs:   number;
+  scanned:         number;
+  hiddenPhotos:    number;
+  hiddenVin:       number;
+  hiddenDupVin:    number;
+  strikesIssued:   number;
+  ownersSuspended: number;
+  errors:          number;
+  durationMs:      number;
+}
+
+// Internal: one pending hide action, possibly triggered by multiple rules.
+interface Pending {
+  id:      string;
+  slug:    string;
+  rules:   { photos: boolean; vinLength: boolean; dupVin: boolean };
+  reasons: string[];
+}
+
+function classifyKind(rules: Pending["rules"]): string {
+  const fired: string[] = [];
+  if (rules.photos)    fired.push("photos");
+  if (rules.vinLength) fired.push("vin_length");
+  if (rules.dupVin)    fired.push("dup_vin");
+  if (fired.length > 1) return "mixed";
+  return fired[0] ?? "unknown";
+}
+
+async function collectPending(limit: number): Promise<Map<string, Pending>> {
+  const [nonCompliant, dupVins] = await Promise.all([
+    getNonCompliantListings(limit),
+    findDuplicateVins(limit),
+  ]);
+
+  const pending = new Map<string, Pending>();
+  const upsert = (id: string, slug: string): Pending => {
+    const existing = pending.get(id);
+    if (existing) return existing;
+    const fresh: Pending = {
+      id, slug,
+      rules: { photos: false, vinLength: false, dupVin: false },
+      reasons: [],
+    };
+    pending.set(id, fresh);
+    return fresh;
+  };
+
+  for (const row of nonCompliant) {
+    const p = upsert(row.id, row.slug);
+    if (row.missingPhotos) { p.rules.photos    = true; p.reasons.push(`photos<10 (${row.photoCount})`); }
+    if (row.missingVin)    { p.rules.vinLength = true; p.reasons.push(`vin_length<11 (${row.vinLength})`); }
+  }
+  for (const dup of dupVins) {
+    const p = upsert(dup.id, dup.slug);
+    p.rules.dupVin = true;
+    p.reasons.push(`duplicate_vin (original=${dup.originalId})`);
+  }
+  return pending;
+}
+
+async function processOne(p: Pending, dryRun: boolean, r: AutoModerateResult): Promise<void> {
+  try {
+    await applyHide(p, dryRun);
+    if (p.rules.photos)    r.hiddenPhotos++;
+    if (p.rules.vinLength) r.hiddenVin++;
+    if (p.rules.dupVin)    r.hiddenDupVin++;
+
+    if (!dryRun) {
+      const strike = await maybeStrikeOwner(p);
+      if (strike.recorded)      r.strikesIssued++;
+      if (strike.autoSuspended) r.ownersSuspended++;
+    }
+  } catch {
+    r.errors++;
+  }
 }
 
 export async function autoModerateListings(opts: {
@@ -34,83 +106,52 @@ export async function autoModerateListings(opts: {
   const { dryRun = false, limit = 500 } = opts;
   const t0 = Date.now();
 
-  const [nonCompliant, dupVins] = await Promise.all([
-    getNonCompliantListings(limit),
-    findDuplicateVins(limit),
-  ]);
-
-  // Deduplicate: a listing that's both photo-short AND a VIN duplicate gets
-  // one hide action with both reasons concatenated.
-  type Pending = {
-    id:        string;
-    slug:      string;
-    reasons:   string[];
-    dealerId:  string | null;
-    kind:      "photos" | "vin_length" | "dup_vin" | "mixed";
+  const pending = await collectPending(limit);
+  const result: AutoModerateResult = {
+    scanned:         pending.size,
+    hiddenPhotos:    0,
+    hiddenVin:       0,
+    hiddenDupVin:    0,
+    strikesIssued:   0,
+    ownersSuspended: 0,
+    errors:          0,
+    durationMs:      0,
   };
-  const pending = new Map<string, Pending>();
-
-  for (const row of nonCompliant) {
-    const reasons: string[] = [];
-    if (row.missingPhotos) reasons.push(`photos<10 (${row.photoCount})`);
-    if (row.missingVin)    reasons.push(`vin_length<11 (${row.vinLength})`);
-    pending.set(row.id, {
-      id:       row.id,
-      slug:     row.slug,
-      reasons,
-      dealerId: null, // getNonCompliantListings doesn't return it; harmless for the log
-      kind:     row.missingPhotos && row.missingVin
-                  ? "mixed"
-                  : row.missingPhotos ? "photos" : "vin_length",
-    });
-  }
-  for (const dup of dupVins) {
-    const existing = pending.get(dup.id);
-    const reason   = `duplicate_vin (original=${dup.originalId})`;
-    if (existing) {
-      existing.reasons.push(reason);
-      existing.kind = "mixed";
-    } else {
-      pending.set(dup.id, {
-        id:       dup.id,
-        slug:     dup.slug,
-        reasons:  [reason],
-        dealerId: dup.dealerId,
-        kind:     "dup_vin",
-      });
-    }
-  }
-
-  let hiddenPhotos = 0, hiddenVin = 0, hiddenDupVin = 0, errors = 0;
 
   for (const p of pending.values()) {
-    const reasonText = `auto: ${p.reasons.join("; ")}`;
-    try {
-      if (!dryRun) {
-        await adminModerateCar(p.id, SYSTEM_ACTOR_ID, "hidden", reasonText);
-        await logAdminAction({
-          adminId:    SYSTEM_ACTOR_ID,
-          adminEmail: SYSTEM_ACTOR_EMAIL,
-          action:     "listing_auto_hide",
-          targetType: "car",
-          targetId:   p.id,
-          details:    { slug: p.slug, kind: p.kind, reasons: p.reasons },
-        });
-      }
-      if (p.kind === "photos" || (p.kind === "mixed" && p.reasons.some((r) => r.startsWith("photos")))) hiddenPhotos++;
-      if (p.kind === "vin_length" || (p.kind === "mixed" && p.reasons.some((r) => r.startsWith("vin_length")))) hiddenVin++;
-      if (p.kind === "dup_vin"    || (p.kind === "mixed" && p.reasons.some((r) => r.startsWith("duplicate_vin")))) hiddenDupVin++;
-    } catch {
-      errors++;
-    }
+    await processOne(p, dryRun, result);
   }
 
-  return {
-    scanned:      pending.size,
-    hiddenPhotos,
-    hiddenVin,
-    hiddenDupVin,
-    errors,
-    durationMs:   Date.now() - t0,
-  };
+  result.durationMs = Date.now() - t0;
+  return result;
+}
+
+async function applyHide(p: Pending, dryRun: boolean): Promise<void> {
+  if (dryRun) return;
+  const reasonText = `auto: ${p.reasons.join("; ")}`;
+  await adminModerateCar(p.id, SYSTEM_ACTOR_ID, "hidden", reasonText);
+  await logAdminAction({
+    adminId:    SYSTEM_ACTOR_ID,
+    adminEmail: SYSTEM_ACTOR_EMAIL,
+    action:     "listing_auto_hide",
+    targetType: "car",
+    targetId:   p.id,
+    details:    { slug: p.slug, kind: classifyKind(p.rules), reasons: p.reasons },
+  });
+}
+
+// Strike the listing's owner. Login-free listings (no dealer, no seller_user_id)
+// have no actor to strike — skip silently. The recordStrike helper handles
+// auto-suspension once the actor crosses the threshold.
+async function maybeStrikeOwner(p: Pending) {
+  const owner = await getCarOwner(p.id);
+  if (!owner) return { recorded: false, autoSuspended: false };
+
+  return recordStrike({
+    actorType:  owner.type,
+    actorId:    owner.id,
+    reason:     `listing_auto_hide: ${p.slug} (${classifyKind(p.rules)})`,
+    adminId:    SYSTEM_ACTOR_ID,
+    adminEmail: SYSTEM_ACTOR_EMAIL,
+  });
 }

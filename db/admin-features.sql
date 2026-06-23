@@ -51,6 +51,25 @@ ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderated_by     TEXT;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderated_at     TIMESTAMPTZ;
 ALTER TABLE cars ADD COLUMN IF NOT EXISTS moderation_reason TEXT;
 
+-- ── 6b. Strike system (PR2) ──────────────────────────────────
+-- Strikes accumulate from auto-moderation (every auto-hide = one strike on
+-- the listing's owner) and manual admin actions. Crossing the threshold
+-- triggers auto-suspension; admins can also suspend manually with reason.
+--
+-- Dealers get is_active/suspended_at/suspension_reason mirroring the columns
+-- users already have. strike_count + last_strike_at on both tables so we can
+-- enforce "N strikes in 30 days" without a join. Strike *history* lives in
+-- admin_logs (action='dealer_strike' / 'seller_strike') so we don't need a
+-- separate strikes table.
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS is_active          BOOLEAN     NOT NULL DEFAULT TRUE;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS suspended_at       TIMESTAMPTZ;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS suspension_reason  TEXT;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS strike_count       INTEGER     NOT NULL DEFAULT 0;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS last_strike_at     TIMESTAMPTZ;
+ALTER TABLE users   ADD COLUMN IF NOT EXISTS strike_count       INTEGER     NOT NULL DEFAULT 0;
+ALTER TABLE users   ADD COLUMN IF NOT EXISTS last_strike_at     TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dealers_is_active ON dealers(is_active);
+
 -- ── 6. News Intelligence Layer (PR1) ─────────────────────────
 -- Each article is augmented post-fetch with a Kenya-impact overlay.
 --   impact_score: deterministic brand+segment lookup ('high' | 'medium' | 'low')

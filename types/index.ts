@@ -186,6 +186,15 @@ export interface Dealer {
   location: string;
   status: DealerStatus;
   rejectionReason?: string | null;
+  // PR2 strike system. is_active is the enforcement flag — auto-mod flips it
+  // false after STRIKE_AUTO_SUSPEND_COUNT strikes inside the rolling window;
+  // admins can also flip it manually with a reason via /api/admin/dealers.
+  // Unsuspending clears suspendedAt/Reason and resets strikeCount.
+  isActive?: boolean;
+  suspendedAt?: string | null;
+  suspensionReason?: string | null;
+  strikeCount?: number;
+  lastStrikeAt?: string | null;
   createdAt: string;
   updatedAt: string;
   userName?: string;
@@ -261,6 +270,10 @@ export interface User {
   isActive?: boolean;
   suspendedAt?: string | null;
   suspendedReason?: string | null;
+  // PR2 strike system: lifetime strike counter, reset to 0 on manual unsuspend.
+  // lastStrikeAt is when the most recent one was recorded.
+  strikeCount?: number;
+  lastStrikeAt?: string | null;
   createdAt: string;
 }
 

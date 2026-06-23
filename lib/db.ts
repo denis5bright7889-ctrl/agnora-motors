@@ -286,7 +286,13 @@ export async function createUser(data: {
 
 export async function listUsers(): Promise<User[]> {
   return query<User>(
-    `SELECT id, name, email, image, role, created_at AS "createdAt"
+    `SELECT id, name, email, image, role,
+            is_active        AS "isActive",
+            suspended_at     AS "suspendedAt",
+            suspended_reason AS "suspendedReason",
+            strike_count     AS "strikeCount",
+            last_strike_at   AS "lastStrikeAt",
+            created_at       AS "createdAt"
      FROM users ORDER BY created_at DESC`,
   );
 }
@@ -371,6 +377,11 @@ export async function listDealers(status?: string): Promise<Dealer[]> {
             d.director_name AS "directorName", d.director_id_url AS "directorIdUrl",
             d.business_cert_url AS "businessCertUrl", d.phone, d.location,
             d.status, d.rejection_reason AS "rejectionReason",
+            d.is_active         AS "isActive",
+            d.suspended_at      AS "suspendedAt",
+            d.suspension_reason AS "suspensionReason",
+            d.strike_count      AS "strikeCount",
+            d.last_strike_at    AS "lastStrikeAt",
             d.created_at AS "createdAt", d.updated_at AS "updatedAt",
             u.name AS "userName", u.email AS "userEmail"
      FROM dealers d JOIN users u ON u.id = d.user_id
@@ -415,8 +426,12 @@ export async function createDealerCar(
 
   // PR7: publish-quality guard. Active listings require >= MIN photos AND a VIN.
   // Drafts can be saved with anything so dealers can stage incomplete records.
+  // PR2: also refuse the publish if the dealer has been suspended.
   const status: CarStatus = (data.status ?? "active") as CarStatus;
-  if (status === "active") enforcePublishQuality(data.images, data.vin);
+  if (status === "active") {
+    await assertActorActive("dealer", dealerId);
+    enforcePublishQuality(data.images, data.vin);
+  }
 
   const centroid = getCentroid(data.location);
   const specsJson = JSON.stringify(data.specifications ?? {});
@@ -500,6 +515,33 @@ export class ListingQualityError extends Error {
     super(message);
     this.name = "ListingQualityError";
   }
+}
+
+// PR2 strike system: refuses any publish path when the actor has been
+// suspended (manually by an admin or automatically after crossing the
+// strike threshold). Throws ListingQualityError so the API layer can
+// surface the message verbatim to the suspended dealer/seller without
+// extra error handling — the message explains *why* in their words.
+//
+// Returns silently when the actor is not suspended.
+export async function assertActorActive(
+  actorType: "dealer" | "user",
+  actorId:   string,
+): Promise<void> {
+  const table = actorType === "dealer" ? "dealers" : "users";
+  const reasonCol = actorType === "dealer" ? "suspension_reason" : "suspended_reason";
+  const rows = await query<{ isActive: boolean; reason: string | null }>(
+    `SELECT is_active AS "isActive", ${reasonCol} AS "reason"
+     FROM ${table} WHERE id = $1 LIMIT 1`,
+    [actorId],
+  );
+  const row = rows[0];
+  if (!row) return; // unknown actor — let downstream FK / auth fail clearly
+  if (row.isActive) return;
+  const detail = row.reason ? ` (${row.reason})` : "";
+  throw new ListingQualityError(
+    `Your account is suspended${detail}. Contact support to restore publishing.`,
+  );
 }
 
 // Create a listing with NO dealer/seller account attached. Used by the
@@ -769,6 +811,8 @@ export async function updateDealerCar(
     if (current) {
       const resultingStatus = (data.status ?? current.status) as CarStatus;
       if (resultingStatus === "active") {
+        // PR2: refuse to (re-)publish if the owning dealer has been suspended.
+        await assertActorActive("dealer", dealerId);
         const finalImages = data.images ?? current.images ?? [];
         const finalVin    = data.vin    ?? current.vin    ?? null;
         enforcePublishQuality(finalImages, finalVin);
@@ -1828,6 +1872,66 @@ export async function setUserActive(userId: string, isActive: boolean): Promise<
     `UPDATE users SET is_active = $1 WHERE id = $2`,
     [isActive, userId],
   );
+}
+
+// PR2: manual admin suspend/unsuspend with reason. Stamps suspended_at on
+// suspend, clears it on unsuspend so support can answer "when was this
+// done". When unsuspending, also resets strike_count so the actor isn't
+// instantly re-suspended by the next strike inside the rolling window.
+export async function setUserSuspension(
+  userId: string,
+  isActive: boolean,
+  reason: string | null,
+): Promise<void> {
+  if (isActive) {
+    await query(
+      `UPDATE users
+       SET is_active = TRUE,
+           suspended_at = NULL,
+           suspended_reason = NULL,
+           strike_count = 0
+       WHERE id = $1`,
+      [userId],
+    );
+  } else {
+    await query(
+      `UPDATE users
+       SET is_active = FALSE,
+           suspended_at = NOW(),
+           suspended_reason = $1
+       WHERE id = $2`,
+      [reason, userId],
+    );
+  }
+}
+
+export async function setDealerSuspension(
+  dealerId: string,
+  isActive: boolean,
+  reason: string | null,
+): Promise<void> {
+  if (isActive) {
+    await query(
+      `UPDATE dealers
+       SET is_active = TRUE,
+           suspended_at = NULL,
+           suspension_reason = NULL,
+           strike_count = 0,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [dealerId],
+    );
+  } else {
+    await query(
+      `UPDATE dealers
+       SET is_active = FALSE,
+           suspended_at = NOW(),
+           suspension_reason = $1,
+           updated_at = NOW()
+       WHERE id = $2`,
+      [reason, dealerId],
+    );
+  }
 }
 
 export async function touchLastLogin(userId: string): Promise<void> {

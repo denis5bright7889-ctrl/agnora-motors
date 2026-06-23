@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   CheckCircle2, XCircle, Eye, Clock,
   ChevronDown, ChevronUp, ExternalLink, Search,
+  AlertTriangle, ShieldOff, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Dealer } from "@/types";
@@ -58,6 +59,35 @@ export default function AdminDealersPage() {
     setProcessing(null);
     setRejectTarget(null);
     setRejectReason("");
+  }
+
+  async function suspend(id: string) {
+    const reason = window.prompt("Reason for suspending this dealer (shown to them):", "");
+    if (!reason?.trim()) return;
+    setProcessing(id);
+    await fetch("/api/admin/dealers", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, isActive: false, reason: reason.trim() }),
+    });
+    setDealers((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, isActive: false, suspendedAt: new Date().toISOString(), suspensionReason: reason.trim() } : d)),
+    );
+    setProcessing(null);
+  }
+
+  async function unsuspend(id: string) {
+    if (!confirm("Unsuspend this dealer? This also resets their strike counter.")) return;
+    setProcessing(id);
+    await fetch("/api/admin/dealers", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, isActive: true }),
+    });
+    setDealers((prev) =>
+      prev.map((d) => (d.id === id ? { ...d, isActive: true, suspendedAt: null, suspensionReason: null, strikeCount: 0 } : d)),
+    );
+    setProcessing(null);
   }
 
   const filtered = dealers.filter((d) => {
@@ -132,17 +162,57 @@ export default function AdminDealersPage() {
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="font-semibold">{dealer.businessName}</p>
                     <StatusPill status={dealer.status} />
+                    {dealer.isActive === false && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold text-red-500">
+                        <ShieldOff className="h-3 w-3" /> Suspended
+                      </span>
+                    )}
+                    {(dealer.strikeCount ?? 0) > 0 && (
+                      <span
+                        title={dealer.suspensionReason ?? "Strikes from auto-moderation"}
+                        className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2 py-0.5 text-[10px] font-semibold text-orange-500"
+                      >
+                        <AlertTriangle className="h-3 w-3" />
+                        {dealer.strikeCount} {dealer.strikeCount === 1 ? "strike" : "strikes"}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-muted mt-0.5">
                     {dealer.userEmail} · {dealer.location} ·{" "}
                     {new Date(dealer.createdAt).toLocaleDateString("en-KE")}
                   </p>
+                  {dealer.suspensionReason && dealer.isActive === false && (
+                    <p className="text-[11px] text-red-500 mt-1">
+                      Reason: {dealer.suspensionReason}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0">
+                  {dealer.status === "approved" && dealer.isActive !== false && (
+                    <button
+                      type="button"
+                      disabled={processing === dealer.id}
+                      onClick={() => suspend(dealer.id)}
+                      className="h-8 inline-flex items-center gap-1.5 rounded-full bg-orange-500/15 px-3 text-xs font-semibold text-orange-500 hover:bg-orange-500/25 transition-colors disabled:opacity-50"
+                    >
+                      <ShieldOff className="h-3.5 w-3.5" /> Suspend
+                    </button>
+                  )}
+                  {dealer.isActive === false && (
+                    <button
+                      type="button"
+                      disabled={processing === dealer.id}
+                      onClick={() => unsuspend(dealer.id)}
+                      className="h-8 inline-flex items-center gap-1.5 rounded-full bg-green-500/15 px-3 text-xs font-semibold text-green-600 dark:text-green-400 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+                    >
+                      <ShieldCheck className="h-3.5 w-3.5" /> Unsuspend
+                    </button>
+                  )}
                   {dealer.status === "pending" && (
                     <>
                       <button
+                        type="button"
                         disabled={processing === dealer.id}
                         onClick={() => approve(dealer.id)}
                         className="h-8 inline-flex items-center gap-1.5 rounded-full bg-green-500/15 px-3 text-xs font-semibold text-green-600 dark:text-green-400 hover:bg-green-500/25 transition-colors disabled:opacity-50"
@@ -151,6 +221,7 @@ export default function AdminDealersPage() {
                         {processing === dealer.id ? "…" : "Approve"}
                       </button>
                       <button
+                        type="button"
                         onClick={() => setRejectTarget(dealer.id)}
                         className="h-8 inline-flex items-center gap-1.5 rounded-full bg-red-500/15 px-3 text-xs font-semibold text-red-500 hover:bg-red-500/25 transition-colors"
                       >

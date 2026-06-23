@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { listUsers, updateUserRole, setUserActive } from "@/lib/db";
+import { listUsers, updateUserRole, setUserActive, setUserSuspension } from "@/lib/db";
 import { auditLog } from "@/lib/admin-logger";
 
 export const runtime = "nodejs";
@@ -29,8 +29,9 @@ export async function PATCH(req: Request) {
     id?: string;
     role?: string;
     isActive?: boolean;
+    reason?: string;
   };
-  const { id, role, isActive } = body;
+  const { id, role, isActive, reason } = body;
 
   if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
 
@@ -52,16 +53,31 @@ export async function PATCH(req: Request) {
   }
 
   // ── Active toggle ─────────────────────────────────────────────
+  // When the toggle is paired with a reason we treat it as a *suspension*
+  // (PR2): stamps suspended_at + suspended_reason so support can answer
+  // "when and why?", and clearing the flag resets strike_count so the
+  // user isn't instantly re-suspended by the next strike in the window.
+  // Without a reason it stays the existing simple active/deactivate toggle.
   if (isActive !== undefined) {
     if (id === session.user.id) {
       return NextResponse.json({ error: "Cannot deactivate yourself" }, { status: 400 });
     }
-    await setUserActive(id, isActive);
-    await auditLog({
-      action: isActive ? "user_activate" : "user_deactivate",
-      targetType: "user", targetId: id,
-      details: { isActive },
-    });
+    const trimmedReason = reason?.trim() || null;
+    if (trimmedReason || !isActive) {
+      await setUserSuspension(id, isActive, trimmedReason);
+      await auditLog({
+        action: isActive ? "user_unsuspend" : "user_suspend",
+        targetType: "user", targetId: id,
+        details: { isActive, reason: trimmedReason },
+      });
+    } else {
+      await setUserActive(id, isActive);
+      await auditLog({
+        action: isActive ? "user_activate" : "user_deactivate",
+        targetType: "user", targetId: id,
+        details: { isActive },
+      });
+    }
   }
 
   return NextResponse.json({ ok: true });

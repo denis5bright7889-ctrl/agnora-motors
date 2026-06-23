@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Users, ShieldCheck, Store, User, Search, RefreshCw } from "lucide-react";
+import {
+  Users, ShieldCheck, Store, User, Search, RefreshCw,
+  AlertTriangle, ShieldOff,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type UserRow = {
@@ -10,6 +13,10 @@ type UserRow = {
   email: string;
   image: string | null;
   role: string;
+  isActive?: boolean;
+  suspendedAt?: string | null;
+  suspendedReason?: string | null;
+  strikeCount?: number;
   createdAt: string;
 };
 
@@ -76,6 +83,35 @@ export default function AdminUsersPage() {
       if (res.ok) {
         setUsers((prev) =>
           prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u)),
+        );
+      }
+    });
+  }
+
+  async function toggleSuspension(userId: string, suspend: boolean) {
+    let reason: string | null = null;
+    if (suspend) {
+      reason = window.prompt("Reason for suspending this account (shown to them):", "");
+      if (!reason?.trim()) return;
+      reason = reason.trim();
+    } else if (!confirm("Unsuspend this account? This also resets their strike counter.")) {
+      return;
+    }
+    startTransition(async () => {
+      const res = await fetch("/api/admin/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: userId, isActive: !suspend, reason }),
+      });
+      if (res.ok) {
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === userId
+              ? suspend
+                ? { ...u, isActive: false, suspendedAt: new Date().toISOString(), suspendedReason: reason }
+                : { ...u, isActive: true,  suspendedAt: null, suspendedReason: null, strikeCount: 0 }
+              : u,
+          ),
         );
       }
     });
@@ -201,17 +237,38 @@ export default function AdminUsersPage() {
                       key={user.id}
                       className="hover:bg-surface-2 transition-colors"
                     >
-                      {/* Avatar + name/email */}
+                      {/* Avatar + name/email + suspension state */}
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <div className="h-9 w-9 rounded-full bg-accent/15 flex items-center justify-center shrink-0 text-accent font-semibold text-sm">
                             {(user.name ?? user.email)[0].toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <p className="font-medium truncate">
-                              {user.name ?? <span className="text-muted italic">No name</span>}
-                            </p>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <p className="font-medium truncate">
+                                {user.name ?? <span className="text-muted italic">No name</span>}
+                              </p>
+                              {user.isActive === false && (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-red-500">
+                                  <ShieldOff className="h-2.5 w-2.5" /> Suspended
+                                </span>
+                              )}
+                              {(user.strikeCount ?? 0) > 0 && (
+                                <span
+                                  title={user.suspendedReason ?? "Strikes from auto-moderation"}
+                                  className="inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-orange-500"
+                                >
+                                  <AlertTriangle className="h-2.5 w-2.5" />
+                                  {user.strikeCount}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-muted truncate">{user.email}</p>
+                            {user.suspendedReason && user.isActive === false && (
+                              <p className="text-[10px] text-red-500 mt-0.5 truncate" title={user.suspendedReason}>
+                                Reason: {user.suspendedReason}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -234,19 +291,40 @@ export default function AdminUsersPage() {
                         })}
                       </td>
 
-                      {/* Role select */}
-                      <td className="px-5 py-3.5 text-right">
-                        <select
-                          defaultValue={user.role}
-                          onChange={(e) => changeRole(user.id, e.target.value)}
-                          disabled={isPending}
-                          className="h-8 rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none focus:border-accent disabled:opacity-50 cursor-pointer"
-                          aria-label={`Change role for ${user.email}`}
-                        >
-                          <option value="buyer">Buyer</option>
-                          <option value="dealer">Dealer</option>
-                          <option value="admin">Admin</option>
-                        </select>
+                      {/* Role select + suspend toggle */}
+                      <td className="px-5 py-3.5">
+                        <div className="flex items-center justify-end gap-2">
+                          {user.isActive === false ? (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => toggleSuspension(user.id, false)}
+                              className="h-8 inline-flex items-center gap-1 rounded-full bg-green-500/15 px-2.5 text-[11px] font-semibold text-green-600 dark:text-green-400 hover:bg-green-500/25 transition-colors disabled:opacity-50"
+                            >
+                              <ShieldCheck className="h-3 w-3" /> Unsuspend
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={isPending}
+                              onClick={() => toggleSuspension(user.id, true)}
+                              className="h-8 inline-flex items-center gap-1 rounded-full bg-orange-500/15 px-2.5 text-[11px] font-semibold text-orange-500 hover:bg-orange-500/25 transition-colors disabled:opacity-50"
+                            >
+                              <ShieldOff className="h-3 w-3" /> Suspend
+                            </button>
+                          )}
+                          <select
+                            defaultValue={user.role}
+                            onChange={(e) => changeRole(user.id, e.target.value)}
+                            disabled={isPending}
+                            className="h-8 rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none focus:border-accent disabled:opacity-50 cursor-pointer"
+                            aria-label={`Change role for ${user.email}`}
+                          >
+                            <option value="buyer">Buyer</option>
+                            <option value="dealer">Dealer</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        </div>
                       </td>
                     </tr>
                   );
