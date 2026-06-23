@@ -6,6 +6,7 @@ import {
   Check, TrendingUp,
 } from "lucide-react";
 import { HeroSearch } from "@/components/sections/hero-search";
+import { BrandLogo } from "@/components/brand-logo";
 import { brands } from "@/data/content";
 
 // ── Body-style categories ─────────────────────────────────────
@@ -233,11 +234,10 @@ export default function HomePage() {
               <Link
                 key={brand.slug}
                 href={`/cars?make=${brand.slug}`}
+                aria-label={`Browse ${brand.name} cars`}
                 className="group flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-background p-4 hover:border-accent hover:bg-accent-soft transition-all active:scale-95"
               >
-                <span className="font-display text-3xl text-muted/30 group-hover:text-accent transition-colors">
-                  {brand.name[0]}
-                </span>
+                <BrandLogo brand={brand} />
                 <span className="text-center text-xs font-semibold">{brand.name}</span>
               </Link>
             ))}

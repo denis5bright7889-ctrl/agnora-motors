@@ -1,18 +1,26 @@
 import type { Brand, Article } from "@/types";
 
+// logoSlug values resolve against the Simple Icons CDN
+// (https://cdn.simpleicons.org). Slugs left undefined will render the
+// lettered fallback in BrandLogo — replace with a known slug or your own
+// asset path once you decide where to host the artwork.
 export const brands: Brand[] = [
-  { name: "Toyota", slug: "toyota", count: 4823, topModel: "Harrier" },
-  { name: "Mazda", slug: "mazda", count: 2147, topModel: "CX-5" },
+  { name: "Toyota",        slug: "toyota",        count: 4823, topModel: "Harrier",   logoSlug: "toyota" },
+  { name: "Mazda",         slug: "mazda",         count: 2147, topModel: "CX-5",      logoSlug: "mazda" },
+  // Mercedes-Benz, Isuzu, Land Rover have no Simple Icons entries.
+  // To show their marks, drop SVGs into /public/brand-logos/{logoSlug}.svg
+  // and switch BrandLogo's `src` to a local path. Until then, the lettered
+  // fallback renders.
   { name: "Mercedes-Benz", slug: "mercedes-benz", count: 1568, topModel: "C-Class" },
-  { name: "Volkswagen", slug: "volkswagen", count: 1342, topModel: "Tiguan" },
-  { name: "Nissan", slug: "nissan", count: 2891, topModel: "X-Trail" },
-  { name: "Honda", slug: "honda", count: 1654, topModel: "CR-V" },
-  { name: "BMW", slug: "bmw", count: 1102, topModel: "X5" },
-  { name: "Ford", slug: "ford", count: 856, topModel: "Ranger" },
-  { name: "Subaru", slug: "subaru", count: 1923, topModel: "Forester" },
-  { name: "Mitsubishi", slug: "mitsubishi", count: 1487, topModel: "Outlander" },
-  { name: "Isuzu", slug: "isuzu", count: 943, topModel: "D-Max" },
-  { name: "Land Rover", slug: "land-rover", count: 421, topModel: "Defender" },
+  { name: "Volkswagen",    slug: "volkswagen",    count: 1342, topModel: "Tiguan",    logoSlug: "volkswagen" },
+  { name: "Nissan",        slug: "nissan",        count: 2891, topModel: "X-Trail",   logoSlug: "nissan" },
+  { name: "Honda",         slug: "honda",         count: 1654, topModel: "CR-V",      logoSlug: "honda" },
+  { name: "BMW",           slug: "bmw",           count: 1102, topModel: "X5",        logoSlug: "bmw" },
+  { name: "Ford",          slug: "ford",          count:  856, topModel: "Ranger",    logoSlug: "ford" },
+  { name: "Subaru",        slug: "subaru",        count: 1923, topModel: "Forester",  logoSlug: "subaru" },
+  { name: "Mitsubishi",    slug: "mitsubishi",    count: 1487, topModel: "Outlander", logoSlug: "mitsubishi" },
+  { name: "Isuzu",         slug: "isuzu",         count:  943, topModel: "D-Max" },
+  { name: "Land Rover",    slug: "land-rover",    count:  421, topModel: "Defender" },
 ];
 
 export const articles: Article[] = [
