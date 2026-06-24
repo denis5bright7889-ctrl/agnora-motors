@@ -730,3 +730,41 @@ CREATE TABLE IF NOT EXISTS vin_cache (
   fields      JSONB NOT NULL DEFAULT '{}'::jsonb,  -- normalised Specifications-compatible shape
   raw         JSONB NOT NULL DEFAULT '{}'::jsonb   -- raw upstream payload, for debugging + future re-mapping
 );
+
+-- ============================================================
+-- Lead CRM (Agnora V10000 Phase 2)
+-- ============================================================
+-- Existing contact_requests rows ARE the leads. We add a pipeline status,
+-- free-form dealer notes, an acquisition source, and last-contact tracking.
+-- Lead *history* lives in lead_activity; dealer to-dos in dealer_tasks.
+-- Pipeline stages: new | contacted | negotiating | test_drive | offer | won | lost
+ALTER TABLE contact_requests ADD COLUMN IF NOT EXISTS status          TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE contact_requests ADD COLUMN IF NOT EXISTS source          TEXT NOT NULL DEFAULT 'listing';
+ALTER TABLE contact_requests ADD COLUMN IF NOT EXISTS notes           TEXT;
+ALTER TABLE contact_requests ADD COLUMN IF NOT EXISTS last_contact_at TIMESTAMPTZ;
+ALTER TABLE contact_requests ADD COLUMN IF NOT EXISTS updated_at      TIMESTAMPTZ DEFAULT NOW();
+CREATE INDEX IF NOT EXISTS idx_contact_status ON contact_requests(status);
+
+-- Append-only activity timeline for a lead (status changes, notes, tasks…).
+CREATE TABLE IF NOT EXISTS lead_activity (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  lead_id    UUID REFERENCES contact_requests(id) ON DELETE CASCADE,
+  dealer_id  UUID REFERENCES dealers(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL,                       -- created | status_changed | note_added | task_added | contacted
+  detail     JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_lead_activity_lead ON lead_activity(lead_id, created_at DESC);
+
+-- Dealer to-dos, optionally attached to a lead.
+CREATE TABLE IF NOT EXISTS dealer_tasks (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  dealer_id  UUID REFERENCES dealers(id) ON DELETE CASCADE,
+  lead_id    UUID REFERENCES contact_requests(id) ON DELETE SET NULL,
+  title      TEXT NOT NULL,
+  done       BOOLEAN NOT NULL DEFAULT FALSE,
+  due_at     TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_dealer_tasks_dealer ON dealer_tasks(dealer_id, done, created_at DESC);

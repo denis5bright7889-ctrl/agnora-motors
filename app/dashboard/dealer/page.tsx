@@ -8,8 +8,9 @@ import {
 } from "lucide-react";
 import {
   getDealerByUserId, getDealerCars, getDealerDailyViews,
-  getInquiriesForDealer, getDealerAccountHealth, isDbConfigured,
+  getDealerAccountHealth, isDbConfigured,
 } from "@/lib/db";
+import { getDealerLeads } from "@/lib/leads";
 import { computeDealerScore, MIN_PHOTOS } from "@/lib/dealer-score";
 import { formatPrice, cn } from "@/lib/utils";
 import type { DealerCar } from "@/types";
@@ -23,6 +24,7 @@ export default async function DealerHomePage() {
 
   let cars: DealerCar[] = [];
   let leadCount = 0;
+  let respondedCount = 0;
   let dailyViews: { date: string; views: string }[] = [];
   let verified = false;
   let strikeCount = 0;
@@ -38,17 +40,21 @@ export default async function DealerHomePage() {
 
     const [carsRes, leads, views, health] = await Promise.all([
       getDealerCars(dealer.id),
-      getInquiriesForDealer(dealer.id),
+      getDealerLeads(dealer.id),
       getDealerDailyViews(dealer.id, 14),
       getDealerAccountHealth(dealer.id),
     ]);
     cars = carsRes;
     leadCount = leads.length;
+    // "Responded" = any lead the dealer moved out of the New stage.
+    respondedCount = leads.filter((l) => l.status !== "new").length;
     dailyViews = views;
     strikeCount = health?.strikeCount ?? 0;
     lastStrikeAt = health?.lastStrikeAt ?? null;
     suspended = health ? !health.isActive : false;
   }
+
+  const responseRate = leadCount > 0 ? `${Math.round((respondedCount / leadCount) * 100)}%` : "—";
 
   const activeCars = cars.filter((c) => c.status === "active");
   const totalViews = cars.reduce((s, c) => s + (c.views ?? 0), 0);
@@ -102,7 +108,7 @@ export default async function DealerHomePage() {
         <Kpi icon={MessageCircle} label="Total leads"      value={leadCount} sub="Buyer enquiries" />
         <Kpi icon={TrendingUp}    label="Conversion"       value={`${conversion}%`} sub="Leads / views" />
         <Kpi icon={Gauge}         label="Dealer score"     value={`${score}/100`} sub={band} accent />
-        <Kpi icon={Clock}         label="Response rate"    value="—" sub="With Lead CRM" />
+        <Kpi icon={Clock}         label="Response rate"    value={responseRate} sub={`${respondedCount}/${leadCount} leads`} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -151,10 +157,10 @@ export default async function DealerHomePage() {
                 {suspended ? "Suspended" : verified ? "Verified & active" : "Pending review"}
               </span>
             </div>
-            <dl className="space-y-1.5 text-sm">
+            <div className="space-y-1.5 text-sm">
               <Row label="Strikes" value={`${strikeCount}/3`} warn={strikeCount > 0} />
               <Row label="Last strike" value={lastStrikeAt ? new Date(lastStrikeAt).toLocaleDateString("en-KE") : "None"} />
-            </dl>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-border bg-surface p-5">
@@ -265,8 +271,8 @@ function Th({ children, className }: { children: React.ReactNode; className?: st
 function Row({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
   return (
     <div className="flex items-center justify-between">
-      <dt className="text-muted">{label}</dt>
-      <dd className={cn("font-medium", warn && "text-yellow-600 dark:text-yellow-400")}>{value}</dd>
+      <span className="text-muted">{label}</span>
+      <span className={cn("font-medium", warn && "text-yellow-600 dark:text-yellow-400")}>{value}</span>
     </div>
   );
 }
