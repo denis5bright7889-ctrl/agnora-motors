@@ -48,7 +48,7 @@ export function Navbar() {
   const isAdmin     = role === "admin";
   const isDealer    = role === "dealer";
   const isPrivate   = role === "private_seller";
-  const dashHref    = isAdmin ? "/admin" : isDealer ? "/dealer-dashboard" : "/private-dashboard";
+  const dashHref    = isAdmin ? "/admin" : isDealer ? "/dashboard/dealer" : "/dashboard/seller";
   const initial     = session?.user?.name?.[0]?.toUpperCase() ?? "?";
 
   // Dealers and private sellers go to their dashboard "add listing".

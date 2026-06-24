@@ -1305,10 +1305,43 @@ export async function getInquiriesForSeller(userId: string): Promise<Inquiry[]> 
             c.year AS "carYear", c.slug AS "carSlug"
      FROM contact_requests cr
      LEFT JOIN cars c ON c.id = cr.car_id
-     WHERE c.seller_id = $1
+     WHERE c.seller_user_id = $1
      ORDER BY cr.created_at DESC`,
     [userId],
   );
+}
+
+// ── Account health (moderation / strikes) ──────────────────
+// Surfaced on the dashboards so sellers/dealers can see their standing.
+
+export interface AccountHealth {
+  isActive:         boolean;
+  strikeCount:      number;
+  lastStrikeAt:     string | null;
+  suspendedAt:      string | null;
+  suspensionReason: string | null;
+}
+
+export async function getDealerAccountHealth(dealerId: string): Promise<AccountHealth | null> {
+  const rows = await query<AccountHealth>(
+    `SELECT is_active AS "isActive", strike_count AS "strikeCount",
+            last_strike_at AS "lastStrikeAt", suspended_at AS "suspendedAt",
+            suspension_reason AS "suspensionReason"
+     FROM dealers WHERE id = $1 LIMIT 1`,
+    [dealerId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function getSellerAccountHealth(userId: string): Promise<AccountHealth | null> {
+  const rows = await query<AccountHealth>(
+    `SELECT is_active AS "isActive", strike_count AS "strikeCount",
+            last_strike_at AS "lastStrikeAt", suspended_at AS "suspendedAt",
+            suspended_reason AS "suspensionReason"
+     FROM users WHERE id = $1 LIMIT 1`,
+    [userId],
+  );
+  return rows[0] ?? null;
 }
 
 // ── Car analytics per dealer ───────────────────────────────
