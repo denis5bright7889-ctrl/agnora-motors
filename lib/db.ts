@@ -744,6 +744,7 @@ export async function getPublicCars(opts: {
   maxPrice?: number;
   financing?: boolean;
   hirePurchase?: boolean;
+  sort?: "recent" | "trust";
 } = {}): Promise<Car[]> {
   // Public visibility — single source of truth (status + grandfather + photo/VIN).
   const conditions: string[] = [buildPublicListingVisibilityWhere("c")];
@@ -809,7 +810,14 @@ export async function getPublicCars(opts: {
     description: string; images: string[]; features: string[]; verified: boolean;
     financingAvailable: boolean; hirePurchaseAvailable: boolean; createdAt: string;
     dealerName: string | null; dealerLocation: string | null; dealerPhone: string | null;
+    dealerSlug: string | null; dealerScore: number | null; dealerVerified: boolean | null;
+    dealerRating: string | null; dealerReviews: string | null; dealerRecommend: string | null;
   };
+
+  // Trust-aware sort surfaces high-score dealers first; default is most recent.
+  const orderBy = opts.sort === "trust"
+    ? `d.score DESC NULLS LAST, c.is_featured DESC, c.created_at DESC`
+    : `c.created_at DESC`;
 
   const rows = await query<Row>(
     `SELECT c.id, c.slug, c.year, c.make, c.model, c.trim,
@@ -821,11 +829,26 @@ export async function getPublicCars(opts: {
             c.created_at AS "createdAt",
             COALESCE(d.business_name, c.seller_name) AS "dealerName",
             COALESCE(d.location, c.location)         AS "dealerLocation",
-            COALESCE(d.phone, c.seller_phone)        AS "dealerPhone"
+            COALESCE(d.phone, c.seller_phone)        AS "dealerPhone",
+            d.slug AS "dealerSlug",
+            d.score AS "dealerScore",
+            (d.status = 'approved') AS "dealerVerified",
+            rv.avg_rating  AS "dealerRating",
+            rv.review_count AS "dealerReviews",
+            rv.recommend_pct AS "dealerRecommend"
      FROM cars c
      LEFT JOIN dealers d ON d.id = c.dealer_id
+     LEFT JOIN (
+       SELECT dealer_id,
+              AVG(rating)::NUMERIC(3,2) AS avg_rating,
+              COUNT(*)                  AS review_count,
+              (AVG(CASE WHEN would_recommend IS TRUE THEN 1.0
+                        WHEN would_recommend IS FALSE THEN 0.0 END) * 100) AS recommend_pct
+       FROM reviews WHERE status = 'published'
+       GROUP BY dealer_id
+     ) rv ON rv.dealer_id = c.dealer_id
      WHERE ${where}
-     ORDER BY c.created_at DESC`,
+     ORDER BY ${orderBy}`,
     params,
   );
 
@@ -848,10 +871,14 @@ export async function getPublicCars(opts: {
     createdAt: r.createdAt,
     dealer: {
       name:     r.dealerName     ?? "Agnora Dealer",
-      rating:   0,
-      reviews:  0,
+      rating:   r.dealerRating   != null ? Number(r.dealerRating) : 0,
+      reviews:  r.dealerReviews  != null ? Number(r.dealerReviews) : 0,
       location: r.dealerLocation ?? "",
       phone:    r.dealerPhone    ?? "",
+      slug:     r.dealerSlug     ?? undefined,
+      score:    r.dealerScore    ?? null,
+      verified: r.dealerVerified ?? false,
+      recommendPct: r.dealerRecommend != null ? Number(r.dealerRecommend) : null,
     },
   }));
 }

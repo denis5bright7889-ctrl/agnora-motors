@@ -4,6 +4,7 @@ import { getDealerByUserId } from "@/lib/db";
 import {
   getLeadById, getLeadActivity, updateLeadStatus, updateLeadNotes, isLeadStage,
 } from "@/lib/leads";
+import { recomputeDealerScore } from "@/lib/reputation";
 
 export const runtime = "nodejs";
 
@@ -46,6 +47,7 @@ export async function PATCH(
     }
     lead = await updateLeadStatus(id, ctx.dealerId, body.status);
     if (!lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+    void recomputeDealerScore(ctx.dealerId);
   }
 
   if (typeof body.notes === "string") {

@@ -12,7 +12,20 @@ import { AiChatWidget } from "@/components/ai-chat-widget";
 import { TrustActions } from "@/components/cars/trust-actions";
 import type { Car as CarType } from "@/types";
 
-export function CarDetail({ car, similar, dealerSlug }: { car: CarType; similar: CarType[]; dealerSlug?: string | null }) {
+export interface DealerTrust {
+  slug: string;
+  score: number;
+  band: string;
+  badges: { id: string; label: string }[];
+  rating: number;
+  reviewCount: number;
+  recommendPct: number | null;
+  avgResponseHours: number | null;
+}
+
+export function CarDetail({ car, similar, dealerSlug, dealerTrust }: {
+  car: CarType; similar: CarType[]; dealerSlug?: string | null; dealerTrust?: DealerTrust | null;
+}) {
   const [activeImg, setActiveImg] = useState(0);
   const [tab, setTab] = useState<"overview" | "specs" | "inspection">("overview");
   const [contactOpen, setContactOpen] = useState(false);
@@ -383,11 +396,52 @@ export function CarDetail({ car, similar, dealerSlug }: { car: CarType; similar:
                     </p>
                   </div>
                 </div>
+                {dealerTrust && (
+                  <div className="mt-4 rounded-2xl bg-surface-2 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted">Dealer Score</span>
+                      <span className="text-sm font-bold text-accent">{dealerTrust.score}/100 · {dealerTrust.band}</span>
+                    </div>
+                    {dealerTrust.reviewCount > 0 && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted">Rating</span>
+                        <span className="font-semibold inline-flex items-center gap-1">
+                          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> {dealerTrust.rating.toFixed(1)} ({dealerTrust.reviewCount})
+                        </span>
+                      </div>
+                    )}
+                    {dealerTrust.recommendPct !== null && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted">Would recommend</span>
+                        <span className="font-semibold">{Math.round(dealerTrust.recommendPct)}%</span>
+                      </div>
+                    )}
+                    {dealerTrust.avgResponseHours !== null && (
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted">Responds in</span>
+                        <span className="font-semibold">
+                          {dealerTrust.avgResponseHours < 1
+                            ? `${Math.round(dealerTrust.avgResponseHours * 60)} min`
+                            : dealerTrust.avgResponseHours < 48
+                            ? `${dealerTrust.avgResponseHours.toFixed(0)} hrs`
+                            : `${Math.round(dealerTrust.avgResponseHours / 24)} days`}
+                        </span>
+                      </div>
+                    )}
+                    {dealerTrust.badges.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {dealerTrust.badges.slice(0, 4).map((b) => (
+                          <span key={b.id} className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-semibold text-accent">{b.label}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <Link
                   href={dealerSlug ? `/dealers/${dealerSlug}` : "/cars"}
                   className="mt-4 block text-center text-xs text-accent hover:underline"
                 >
-                  {dealerSlug ? "View dealer profile" : "See all listings from this dealer"}
+                  {dealerSlug ? "View dealer profile →" : "See all listings from this dealer"}
                 </Link>
                 <TrustActions carId={car!.id} hasDealer={car!.sellerType === "dealer"} />
               </div>

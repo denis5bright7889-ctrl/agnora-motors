@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { isDbConfigured, query } from "@/lib/db";
 import { createComplaint, COMPLAINT_CATEGORIES } from "@/lib/trust";
 import { createNotification } from "@/lib/notifications";
+import { recomputeDealerScore } from "@/lib/reputation";
 
 export const runtime = "nodejs";
 
@@ -40,6 +41,9 @@ export async function POST(req: Request) {
   if (!result.ok) {
     return NextResponse.json({ error: "This listing no longer exists." }, { status: 404 });
   }
+
+  // Refresh cached Dealer Score (complaints weigh negatively).
+  if (result.dealerId) void recomputeDealerScore(result.dealerId);
 
   // Notify the dealer (if the listing belongs to one) so they can respond.
   if (result.dealerId) {

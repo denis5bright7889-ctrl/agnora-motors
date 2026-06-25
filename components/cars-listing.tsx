@@ -49,6 +49,7 @@ const SELLER_TYPES = [
 ];
 const SORT_OPTIONS = [
   { value: "newest",     label: "Newest first" },
+  { value: "trust",      label: "Highest trust" },
   { value: "price_asc",  label: "Price: Low → High" },
   { value: "price_desc", label: "Price: High → Low" },
   { value: "mileage_asc",label: "Lowest mileage" },

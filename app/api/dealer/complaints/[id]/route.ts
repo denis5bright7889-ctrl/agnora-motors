@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { getDealerByUserId } from "@/lib/db";
 import { updateComplaint, isComplaintStatus } from "@/lib/trust";
+import { recomputeDealerScore } from "@/lib/reputation";
 
 export const runtime = "nodejs";
 
@@ -35,5 +36,6 @@ export async function PATCH(
 
   const complaint = await updateComplaint(id, dealer.id, patch);
   if (!complaint) return NextResponse.json({ error: "Complaint not found" }, { status: 404 });
+  void recomputeDealerScore(dealer.id);
   return NextResponse.json({ complaint });
 }

@@ -13,7 +13,8 @@ export type SortKey =
   | "price_desc"
   | "mileage_asc"
   | "year_desc"
-  | "featured";
+  | "featured"
+  | "trust";
 
 export interface SearchFilters {
   q?: string;
@@ -281,6 +282,13 @@ function applySort(cars: Car[], sort: SortKey | undefined): Car[] {
     case "price_desc":  arr.sort((a, b) => b.price - a.price); break;
     case "mileage_asc": arr.sort((a, b) => a.mileage - b.mileage); break;
     case "year_desc":   arr.sort((a, b) => b.year - a.year); break;
+    case "trust":
+      // Highest-trust first: dealer score, then rating, then recency.
+      arr.sort((a, b) =>
+        (b.dealer.score ?? -1) - (a.dealer.score ?? -1)
+        || (b.dealer.rating ?? 0) - (a.dealer.rating ?? 0)
+        || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      break;
     case "featured":
       arr.sort((a, b) => Number(b.isFeatured ?? false) - Number(a.isFeatured ?? false)
         || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

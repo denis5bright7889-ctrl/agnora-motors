@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createLead } from "@/lib/leads";
 import { isDbConfigured } from "@/lib/db";
 import { publishEvent } from "@/lib/realtime";
+import { recomputeDealerScore } from "@/lib/reputation";
 
 export const runtime = "nodejs";
 
@@ -49,6 +50,8 @@ export async function POST(req: Request) {
     publishEvent("lead_created", {
       leadId: result.id, carId: data.carId, dealerId: result.dealerId,
     }).catch(() => {});
+
+    if (result.dealerId) void recomputeDealerScore(result.dealerId);
 
     return NextResponse.json({ ok: true, id: result.id }, { status: 201 });
   } catch (err) {

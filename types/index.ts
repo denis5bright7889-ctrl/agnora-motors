@@ -120,6 +120,11 @@ export interface Car {
     location: string;
     phone: string;
     avatar?: string;
+    // Trust signals (V10000 Phase 5.1) — present for dealer-owned listings.
+    slug?: string;
+    score?: number | null;
+    verified?: boolean;
+    recommendPct?: number | null;
   };
   inspection?: {
     score: number;

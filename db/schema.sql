@@ -836,3 +836,9 @@ UPDATE dealers
    SET slug = lower(regexp_replace(business_name, '[^a-zA-Z0-9]+', '-', 'g')) || '-' || substr(id::text, 1, 6)
  WHERE slug IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dealers_slug ON dealers(slug);
+
+-- Cached Dealer Score so the hot listing query can show trust signals without
+-- recomputing per car. Refreshed on review/complaint/lead events.
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS score            INTEGER;
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS score_updated_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_dealers_score ON dealers(score DESC NULLS LAST);

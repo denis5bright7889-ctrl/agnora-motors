@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { isDbConfigured, query } from "@/lib/db";
 import { createReview } from "@/lib/trust";
 import { createNotification } from "@/lib/notifications";
+import { recomputeDealerScore } from "@/lib/reputation";
 
 export const runtime = "nodejs";
 
@@ -47,6 +48,9 @@ export async function POST(req: Request) {
   if (!result.ok) {
     return NextResponse.json({ error: "This listing can't be reviewed." }, { status: 400 });
   }
+
+  // Refresh the cached Dealer Score so listing cards reflect the new review.
+  void recomputeDealerScore(result.dealerId);
 
   // Notify the dealer's user.
   const owner = await query<{ userId: string }>(

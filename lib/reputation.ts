@@ -110,6 +110,21 @@ export async function getDealerReputation(dealerId: string): Promise<DealerReput
   };
 }
 
+// Recompute and cache the dealer's score on the dealers table so the public
+// listing query can show trust signals cheaply. Best-effort — callers fire it
+// after reputation-affecting events (review, complaint, lead, stage change).
+export async function recomputeDealerScore(dealerId: string): Promise<void> {
+  try {
+    const rep = await getDealerReputation(dealerId);
+    await query(
+      `UPDATE dealers SET score = $1, score_updated_at = NOW() WHERE id = $2`,
+      [rep.score, dealerId],
+    );
+  } catch {
+    /* non-fatal */
+  }
+}
+
 // Ranking is only meaningful at scale. Gate it until the marketplace has
 // enough approved dealers; real percentile computation lands once there's a
 // population to rank against.
@@ -118,6 +133,43 @@ export const RANKING_MIN_DEALERS = 10;
 export interface DealerRanking {
   unlocked: boolean;
   totalDealers: number;
+}
+
+export interface TrustedDealer {
+  slug: string;
+  businessName: string;
+  location: string;
+  score: number;
+  rating: number | null;
+  reviewCount: number;
+}
+
+// Homepage "Top Trusted Dealers" — only dealers that clear the trust bar:
+// verified, score ≥ 80, and at least a few reviews (so it's earned, not noise).
+export async function getTopTrustedDealers(limit = 6): Promise<TrustedDealer[]> {
+  const rows = await query<{
+    slug: string; businessName: string; location: string;
+    score: number; rating: string | null; reviewCount: string;
+  }>(
+    `SELECT d.slug, d.business_name AS "businessName", d.location, d.score,
+            rv.avg_rating AS rating, COALESCE(rv.review_count, 0) AS "reviewCount"
+     FROM dealers d
+     LEFT JOIN (
+       SELECT dealer_id, AVG(rating)::NUMERIC(3,2) AS avg_rating, COUNT(*) AS review_count
+       FROM reviews WHERE status = 'published' GROUP BY dealer_id
+     ) rv ON rv.dealer_id = d.id
+     WHERE d.status = 'approved' AND d.slug IS NOT NULL
+       AND d.score >= 80 AND COALESCE(rv.review_count, 0) >= 3
+     ORDER BY d.score DESC, rv.avg_rating DESC NULLS LAST
+     LIMIT $1`,
+    [limit],
+  );
+  return rows.map((r) => ({
+    slug: r.slug, businessName: r.businessName, location: r.location,
+    score: r.score,
+    rating: r.rating != null ? Number(r.rating) : null,
+    reviewCount: Number(r.reviewCount),
+  }));
 }
 
 export async function getDealerRanking(): Promise<DealerRanking> {

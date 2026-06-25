@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { HeroSearch } from "@/components/sections/hero-search";
 import { BrandLogo } from "@/components/brand-logo";
+import { TrustedDealersSection } from "@/components/sections/trusted-dealers";
 import { brands } from "@/data/content";
 
 // ── Body-style categories ─────────────────────────────────────
@@ -318,6 +319,9 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* ══ Top Trusted Dealers (renders only when dealers qualify) ══ */}
+      <TrustedDealersSection />
 
       {/* ══ Why Agnora ════════════════════════════════════════ */}
       <section className="py-14 lg:py-20">

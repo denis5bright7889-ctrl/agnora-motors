@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Heart, Shield, Gauge, Fuel, MapPin, Settings2, Banknote } from "lucide-react";
+import { Heart, Shield, Gauge, Fuel, MapPin, Settings2, Banknote, Star, Award } from "lucide-react";
 import type { Car } from "@/types";
 import { formatPrice, formatMileage, cn } from "@/lib/utils";
 import { useWishlist, trackRecentlyViewed } from "@/lib/store";
@@ -112,8 +112,42 @@ export function CarCard({ car, priority, className }: Props) {
             <MapPin className="h-3 w-3" /> {car.location}
           </li>
         </ul>
+
+        <DealerTrustRow dealer={car.dealer} />
       </div>
     </article>
+  );
+}
+
+// Trust signals inherited from the selling dealer — shown on every card so
+// buyers can weigh reliability before clicking in. Dealer-owned listings only.
+function DealerTrustRow({ dealer }: { dealer: Car["dealer"] }) {
+  const score = dealer.score ?? null;
+  const reviews = dealer.reviews ?? 0;
+  const showAny = dealer.slug && (dealer.verified || reviews > 0 || score != null);
+  if (!showAny) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/60 mt-1">
+      {dealer.verified && (
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-600 dark:text-green-400">
+          <Shield className="h-3 w-3" /> Verified
+        </span>
+      )}
+      {reviews > 0 && (
+        <span className="inline-flex items-center gap-1 text-[11px] text-muted">
+          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" /> {dealer.rating.toFixed(1)} ({reviews})
+        </span>
+      )}
+      {score != null && score >= 80 && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+          <Award className="h-2.5 w-2.5" /> Trusted · {score}
+        </span>
+      )}
+      {score != null && score < 80 && (
+        <span className="text-[11px] text-muted">Score {score}</span>
+      )}
+    </div>
   );
 }
 
