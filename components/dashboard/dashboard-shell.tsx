@@ -6,7 +6,7 @@ import { signOut } from "next-auth/react";
 import {
   LayoutDashboard, Car, PlusCircle, MessageCircle, BarChart3,
   CreditCard, ShieldCheck, Settings, Home, LogOut, ChevronRight,
-  Zap, type LucideIcon,
+  Zap, Award, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NotificationBell } from "@/components/dashboard/notification-bell";
@@ -29,6 +29,7 @@ const NAV: Record<DashboardVariant, NavItem[]> = {
     { href: "/dealer/listings/new",  label: "Add Car",      icon: PlusCircle },
     { href: "/dashboard/dealer/leads", label: "Leads",      icon: MessageCircle },
     { href: "/dashboard/dealer/analytics", label: "Performance", icon: BarChart3 },
+    { href: "/dashboard/dealer/trust", label: "Trust",        icon: Award },
     { href: "/dealer/subscription",  label: "Subscription", icon: CreditCard },
   ],
   seller: [

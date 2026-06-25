@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { formatPrice, formatMileage, formatDate, cn } from "@/lib/utils";
 import { AiChatWidget } from "@/components/ai-chat-widget";
+import { TrustActions } from "@/components/cars/trust-actions";
 import type { Car as CarType } from "@/types";
 
 export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }) {
@@ -388,6 +389,7 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
                 >
                   See all listings from this dealer
                 </Link>
+                <TrustActions carId={car!.id} hasDealer={car!.sellerType === "dealer"} />
               </div>
 
               {/* Trust badges */}

@@ -785,3 +785,44 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at, created_at DESC);
+
+-- ============================================================
+-- Trust & Reputation (Agnora V10000 Phase 4)
+-- ============================================================
+-- Reviews and complaints are the human inputs into the dealer reputation
+-- layer. Reviews are dealer-scoped (reputation is a dealer concept);
+-- complaints can target any listing. Nothing auto-punishes — complaint
+-- resolution is a human decision (dealer responds, admin adjudicates).
+CREATE TABLE IF NOT EXISTS reviews (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  dealer_id         UUID REFERENCES dealers(id) ON DELETE CASCADE,
+  car_id            UUID REFERENCES cars(id) ON DELETE SET NULL,
+  author_user_id    TEXT REFERENCES users(id) ON DELETE SET NULL,
+  author_name       TEXT NOT NULL,
+  rating            SMALLINT NOT NULL,            -- overall 1–5
+  communication     SMALLINT,                     -- sub-ratings 1–5 (nullable)
+  vehicle_accuracy  SMALLINT,
+  professionalism   SMALLINT,
+  would_recommend   BOOLEAN,
+  body              TEXT,
+  purchase_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  status            TEXT NOT NULL DEFAULT 'published',  -- published | hidden
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_reviews_dealer ON reviews(dealer_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS complaints (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  dealer_id        UUID REFERENCES dealers(id) ON DELETE CASCADE,
+  car_id           UUID REFERENCES cars(id) ON DELETE SET NULL,
+  reporter_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  reporter_email   TEXT,
+  category         TEXT NOT NULL,   -- not_as_described | unreachable | suspected_fraud | duplicate | price_discrepancy | other
+  detail           TEXT NOT NULL,
+  status           TEXT NOT NULL DEFAULT 'submitted',  -- submitted | under_review | resolved | dismissed
+  dealer_response  TEXT,
+  resolution_note  TEXT,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_complaints_dealer ON complaints(dealer_id, status, created_at DESC);
