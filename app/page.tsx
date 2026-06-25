@@ -156,20 +156,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ══ Brand ticker ══════════════════════════════════════ */}
-      <div className="border-y border-border overflow-hidden py-4 bg-surface">
-        <div className="flex animate-ticker whitespace-nowrap">
-          {[...brands, ...brands].map((b, i) => (
-            <span
-              key={i}
-              className="font-display italic text-2xl text-muted/40 px-7 shrink-0"
-            >
-              {b.name}
-            </span>
-          ))}
-        </div>
-      </div>
-
       {/* ══ Vehicle categories ════════════════════════════════ */}
       <section className="py-14 lg:py-20">
         <div className="container max-w-container">
@@ -222,27 +208,30 @@ export default function HomePage() {
       </section>
 
       {/* ══ Popular brands ════════════════════════════════════ */}
-      <section className="py-14 lg:py-20 bg-surface">
-        <div className="container max-w-container">
+      {/* Horizontally-scrolling logo ticker. The list is duplicated so the
+          -50% translation loops seamlessly; key suffix distinguishes the
+          two halves so React doesn't warn about duplicate keys. */}
+      <section className="py-14 lg:py-20 bg-surface overflow-hidden">
+        <div className="container max-w-container mb-8">
           <p className="mb-1 text-xs font-semibold uppercase tracking-widest text-accent">
             Shop by make
           </p>
-          <h2 className="mb-8 font-display text-3xl lg:text-4xl font-medium tracking-tight">
+          <h2 className="font-display text-3xl lg:text-4xl font-medium tracking-tight">
             Popular brands
           </h2>
-          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-            {brands.map((brand) => (
-              <Link
-                key={brand.slug}
-                href={`/cars?make=${brand.slug}`}
-                aria-label={`Browse ${brand.name} cars`}
-                className="group flex aspect-square flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-background p-4 hover:border-accent hover:bg-accent-soft transition-all active:scale-95"
-              >
-                <BrandLogo brand={brand} />
-                <span className="text-center text-xs font-semibold">{brand.name}</span>
-              </Link>
-            ))}
-          </div>
+        </div>
+        <div className="flex animate-ticker gap-4 whitespace-nowrap">
+          {[...brands, ...brands].map((brand, i) => (
+            <Link
+              key={`${brand.slug}-${i < brands.length ? "a" : "b"}`}
+              href={`/cars?make=${brand.slug}`}
+              aria-label={`Browse ${brand.name} cars`}
+              className="group flex h-32 w-32 shrink-0 flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-background p-4 hover:border-accent hover:bg-accent-soft transition-all active:scale-95"
+            >
+              <BrandLogo brand={brand} />
+              <span className="text-center text-xs font-semibold">{brand.name}</span>
+            </Link>
+          ))}
         </div>
       </section>
 
