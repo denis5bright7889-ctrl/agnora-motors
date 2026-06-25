@@ -4,14 +4,15 @@ import { auth } from "@/auth";
 import {
   Car, Eye, MessageCircle, TrendingUp, Gauge, Clock,
   PlusCircle, ArrowRight, ShieldCheck, ShieldAlert, AlertTriangle,
-  BarChart3, Image as ImageIcon,
+  BarChart3, Image as ImageIcon, Award,
 } from "lucide-react";
 import {
   getDealerByUserId, getDealerCars, getDealerDailyViews,
   getDealerAccountHealth, isDbConfigured,
 } from "@/lib/db";
 import { getDealerLeads } from "@/lib/leads";
-import { computeDealerScore, MIN_PHOTOS } from "@/lib/dealer-score";
+import { getDealerReputation, getDealerRanking, type DealerReputation } from "@/lib/reputation";
+import { MIN_PHOTOS } from "@/lib/dealer-score";
 import { formatPrice, cn } from "@/lib/utils";
 import type { DealerCar } from "@/types";
 
@@ -31,6 +32,8 @@ export default async function DealerHomePage() {
   let lastStrikeAt: string | null = null;
   let suspended = false;
   let pending = false;
+  let rep: DealerReputation | null = null;
+  let ranking: { unlocked: boolean; totalDealers: number } | null = null;
 
   if (isDbConfigured() && session.user.role === "dealer") {
     const dealer = await getDealerByUserId(session.user.id);
@@ -38,11 +41,13 @@ export default async function DealerHomePage() {
     verified = dealer.status === "approved";
     pending = dealer.status === "pending";
 
-    const [carsRes, leads, views, health] = await Promise.all([
+    const [carsRes, leads, views, health, reputation, rank] = await Promise.all([
       getDealerCars(dealer.id),
       getDealerLeads(dealer.id),
       getDealerDailyViews(dealer.id, 14),
       getDealerAccountHealth(dealer.id),
+      getDealerReputation(dealer.id),
+      getDealerRanking(),
     ]);
     cars = carsRes;
     leadCount = leads.length;
@@ -52,6 +57,8 @@ export default async function DealerHomePage() {
     strikeCount = health?.strikeCount ?? 0;
     lastStrikeAt = health?.lastStrikeAt ?? null;
     suspended = health ? !health.isActive : false;
+    rep = reputation;
+    ranking = rank;
   }
 
   const responseRate = leadCount > 0 ? `${Math.round((respondedCount / leadCount) * 100)}%` : "—";
@@ -62,12 +69,8 @@ export default async function DealerHomePage() {
   const listingsWithEnoughPhotos = activeCars.filter((c) => (c.images?.length ?? 0) >= MIN_PHOTOS).length;
   const missingPhotos = activeCars.length - listingsWithEnoughPhotos;
 
-  const { score, band } = computeDealerScore({
-    verified, strikeCount,
-    activeListings: activeCars.length,
-    listingsWithEnoughPhotos,
-    totalViews, totalLeads: leadCount,
-  });
+  const score = rep?.score ?? 0;
+  const band = rep?.band ?? "Needs Attention";
 
   const chart = buildChart(dailyViews, 14);
   const maxViews = Math.max(...chart.map((d) => d.views), 1);
@@ -110,6 +113,22 @@ export default async function DealerHomePage() {
         <Kpi icon={Gauge}         label="Dealer score"     value={`${score}/100`} sub={band} accent />
         <Kpi icon={Clock}         label="Response rate"    value={responseRate} sub={`${respondedCount}/${leadCount} leads`} />
       </div>
+
+      {/* Reputation strip: earned badges + ranking */}
+      {(rep && (rep.badges.length > 0 || ranking)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {rep.badges.map((b) => (
+            <span key={b.id} className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent">
+              <Award className="h-3.5 w-3.5" /> {b.label}
+            </span>
+          ))}
+          {ranking && !ranking.unlocked && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted">
+              Ranking unlocks at {10 - ranking.totalDealers > 0 ? `${10 - ranking.totalDealers} more dealers` : "10 dealers"}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-3">
         {/* Views chart */}

@@ -826,3 +826,13 @@ CREATE TABLE IF NOT EXISTS complaints (
   updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_complaints_dealer ON complaints(dealer_id, status, created_at DESC);
+
+-- ============================================================
+-- Reputation: public dealer profile slug (Agnora V10000 Phase 5)
+-- ============================================================
+ALTER TABLE dealers ADD COLUMN IF NOT EXISTS slug TEXT;
+-- Backfill existing dealers: slugified business name + short id suffix.
+UPDATE dealers
+   SET slug = lower(regexp_replace(business_name, '[^a-zA-Z0-9]+', '-', 'g')) || '-' || substr(id::text, 1, 6)
+ WHERE slug IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dealers_slug ON dealers(slug);

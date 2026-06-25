@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getCarBySlug as getCarBySlugFromDb, isDbConfigured } from "@/lib/db";
+import { getCarBySlug as getCarBySlugFromDb, getDealerSlugForCar, isDbConfigured } from "@/lib/db";
 import { CarDetail } from "./car-detail-client";
 
 // Server component: resolves the listing on the server so /cars/[slug] uses
@@ -24,10 +24,13 @@ export default async function CarDetailPage({
 
   if (!car) notFound();
 
+  // Deep-link to the dealer's public trust profile (null for private listings).
+  const dealerSlug = await getDealerSlugForCar(car.id).catch(() => null);
+
   // No more static-catalogue "similar cars" filler. Linking to demo cars
   // that 404 on click is worse than no rail at all. Pass empty[] so the
   // CarDetail client hides the rail entirely (gated on `similar.length > 0`).
   // Restore a real similar-cars rail once we have a DB-backed implementation
   // that queries by body type + price band.
-  return <CarDetail car={car} similar={[]} />;
+  return <CarDetail car={car} similar={[]} dealerSlug={dealerSlug} />;
 }

@@ -12,7 +12,7 @@ import { AiChatWidget } from "@/components/ai-chat-widget";
 import { TrustActions } from "@/components/cars/trust-actions";
 import type { Car as CarType } from "@/types";
 
-export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }) {
+export function CarDetail({ car, similar, dealerSlug }: { car: CarType; similar: CarType[]; dealerSlug?: string | null }) {
   const [activeImg, setActiveImg] = useState(0);
   const [tab, setTab] = useState<"overview" | "specs" | "inspection">("overview");
   const [contactOpen, setContactOpen] = useState(false);
@@ -384,10 +384,10 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
                   </div>
                 </div>
                 <Link
-                  href="/cars"
+                  href={dealerSlug ? `/dealers/${dealerSlug}` : "/cars"}
                   className="mt-4 block text-center text-xs text-accent hover:underline"
                 >
-                  See all listings from this dealer
+                  {dealerSlug ? "View dealer profile" : "See all listings from this dealer"}
                 </Link>
                 <TrustActions carId={car!.id} hasDealer={car!.sellerType === "dealer"} />
               </div>

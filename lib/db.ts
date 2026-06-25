@@ -331,11 +331,14 @@ export async function createDealer(data: {
   location: string;
   status?: "pending" | "approved" | "rejected";
 }): Promise<Dealer> {
+  // Public-profile slug (/dealers/[slug]). Random suffix keeps it unique even
+  // when two dealers share a business name.
+  const slug = `${slugify(data.businessName)}-${Math.random().toString(36).slice(2, 7)}`;
   const rows = await query<Dealer>(
     `INSERT INTO dealers
        (user_id, business_name, business_reg, kra_pin, director_name,
-        director_id_url, business_cert_url, phone, location, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10, 'pending'))
+        director_id_url, business_cert_url, phone, location, status, slug)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10, 'pending'), $11)
      RETURNING
        id, user_id AS "userId", business_name AS "businessName",
        business_reg AS "businessReg", kra_pin AS "kraPin",
@@ -346,10 +349,40 @@ export async function createDealer(data: {
     [
       data.userId, data.businessName, data.businessReg, data.kraPin,
       data.directorName, data.directorIdUrl, data.businessCertUrl,
-      data.phone, data.location, data.status ?? null,
+      data.phone, data.location, data.status ?? null, slug,
     ],
   );
   return rows[0];
+}
+
+export interface DealerProfile {
+  id: string;
+  slug: string;
+  businessName: string;
+  location: string;
+  phone: string;
+  status: string;
+  createdAt: string;
+}
+
+// Public-profile slug for the dealer that owns a car (null for private /
+// login-free listings). Used to deep-link a listing to its dealer profile.
+export async function getDealerSlugForCar(carId: string): Promise<string | null> {
+  const rows = await query<{ slug: string | null }>(
+    `SELECT d.slug FROM cars c JOIN dealers d ON d.id = c.dealer_id WHERE c.id = $1 LIMIT 1`,
+    [carId],
+  );
+  return rows[0]?.slug ?? null;
+}
+
+export async function getDealerProfileBySlug(slug: string): Promise<DealerProfile | null> {
+  const rows = await query<DealerProfile>(
+    `SELECT id, slug, business_name AS "businessName", location, phone, status,
+            created_at AS "createdAt"
+     FROM dealers WHERE slug = $1 LIMIT 1`,
+    [slug],
+  );
+  return rows[0] ?? null;
 }
 
 export async function getDealerByUserId(userId: string): Promise<Dealer | null> {
