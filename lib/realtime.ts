@@ -18,6 +18,7 @@ export type EventType =
   | "user_registered"
   | "listing_created"
   | "listing_sold"
+  | "lead_created"
   | "dealer_approved"
   | "dealer_rejected"
   | "seller_approved";

@@ -599,19 +599,43 @@ function SpecsTable({
 
 function ContactModal({ car, onClose }: { car: any; onClose: () => void }) {
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [message, setMessage] = useState(`Hi, I'm interested in the ${car.year} ${car.make} ${car.model}. Is it still available?`);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    // PR8: track contact-request creation. We do NOT log buyer PII (name,
-    // email, phone) — only the car context.
-    trackEvent("contact_request_created", {
-      carId: car.id, make: car.make, model: car.model, year: car.year, price: car.price,
-    });
-    setSent(true);
+    setError("");
+    setSubmitting(true);
+    try {
+      // Persist the enquiry as a lead in the dealer's CRM.
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          carId: car.id, name, email, phone: phone || undefined, message,
+          source: "vehicle_page",
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        setError(j.error ?? "Could not send your message. Please try again.");
+        return;
+      }
+      // PR8: track contact-request creation. We do NOT log buyer PII (name,
+      // email, phone) — only the car context.
+      trackEvent("contact_request_created", {
+        carId: car.id, make: car.make, model: car.model, year: car.year, price: car.price,
+      });
+      setSent(true);
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -674,11 +698,15 @@ function ContactModal({ car, onClose }: { car: any; onClose: () => void }) {
                 rows={3}
                 className="w-full rounded-xl border border-border bg-surface-2 px-4 py-3 text-sm outline-none focus:border-accent placeholder:text-muted resize-none"
               />
+              {error && (
+                <p className="text-sm text-red-500" role="alert">{error}</p>
+              )}
               <button
                 type="submit"
-                className="w-full h-12 rounded-full bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+                disabled={submitting}
+                className="w-full h-12 rounded-full bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
               >
-                Send message
+                {submitting ? "Sending…" : "Send message"}
               </button>
             </form>
           </>

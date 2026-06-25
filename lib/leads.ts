@@ -22,6 +22,23 @@ export function isLeadStage(v: unknown): v is LeadStage {
   return typeof v === "string" && (LEAD_STAGES as readonly string[]).includes(v);
 }
 
+// ── Source attribution ───────────────────────────────────────
+// Where a lead came from. Stored on every lead so we can later learn which
+// surfaces actually generate buyers (which cars convert, do featured slots
+// work, etc.). Defaults to "vehicle_page" — the only entry point today.
+export const LEAD_SOURCES = [
+  "vehicle_page", "homepage", "search_results",
+  "featured_listing", "dealer_profile", "shared_link",
+] as const;
+
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
+export function normalizeSource(v: unknown): LeadSource {
+  return typeof v === "string" && (LEAD_SOURCES as readonly string[]).includes(v)
+    ? (v as LeadSource)
+    : "vehicle_page";
+}
+
 // ── Types ────────────────────────────────────────────────────
 
 export interface Lead {
@@ -73,6 +90,54 @@ const LEAD_COLS = `
   c.year AS "carYear", c.slug AS "carSlug"`;
 
 // ── Leads ────────────────────────────────────────────────────
+
+export interface CreateLeadInput {
+  carId: string;
+  buyerName: string;
+  buyerEmail: string;
+  buyerPhone?: string | null;
+  message: string;
+  source?: string;
+}
+
+export type CreateLeadResult =
+  | { ok: true; id: string; dealerId: string | null }
+  | { ok: false; reason: "car_not_found" };
+
+// Persists a buyer enquiry as a lead. Resolves the owning dealer from the
+// car so the lead lands in that dealer's CRM, stamps source attribution, and
+// (for dealer-owned cars) opens the activity timeline with a "created" entry.
+export async function createLead(input: CreateLeadInput): Promise<CreateLeadResult> {
+  const carRows = await query<{ dealerId: string | null }>(
+    `SELECT dealer_id AS "dealerId" FROM cars WHERE id = $1 LIMIT 1`,
+    [input.carId],
+  );
+  if (carRows.length === 0) return { ok: false, reason: "car_not_found" };
+
+  const dealerId = carRows[0].dealerId;
+  const source = normalizeSource(input.source);
+
+  const rows = await query<{ id: string }>(
+    `INSERT INTO contact_requests
+       (car_id, dealer_id, buyer_name, buyer_email, buyer_phone, message, status, source)
+     VALUES ($1, $2, $3, $4, $5, $6, 'new', $7)
+     RETURNING id`,
+    [
+      input.carId, dealerId, input.buyerName, input.buyerEmail,
+      input.buyerPhone ?? null, input.message, source,
+    ],
+  );
+  const id = rows[0].id;
+
+  if (dealerId) {
+    await query(
+      `INSERT INTO lead_activity (lead_id, dealer_id, type, detail) VALUES ($1, $2, 'created', $3)`,
+      [id, dealerId, JSON.stringify({ source })],
+    );
+  }
+
+  return { ok: true, id, dealerId };
+}
 
 export async function getDealerLeads(dealerId: string): Promise<Lead[]> {
   return query<Lead>(
