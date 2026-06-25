@@ -2,8 +2,8 @@ import { query, getDealerCars, getDealerAccountHealth } from "@/lib/db";
 import { getDealerLeads } from "@/lib/leads";
 import { getDealerReviewSummary, getDealerComplaintStats } from "@/lib/trust";
 import {
-  computeDealerScore, computeDealerBadges, MIN_PHOTOS,
-  type Badge, type ScoreBand,
+  computeDealerScore, computeDealerBadges, explainDealerScore, MIN_PHOTOS,
+  type Badge, type ScoreBand, type ScoreExplanation, type DealerScoreInput,
 } from "@/lib/dealer-score";
 
 // Single source of truth for a dealer's reputation — assembled from cars,
@@ -15,6 +15,7 @@ export interface DealerReputation {
   band: ScoreBand;
   reviewConfidence: number;
   badges: Badge[];
+  explanation: ScoreExplanation;
   metrics: {
     activeListings: number;
     totalListings: number;
@@ -58,7 +59,7 @@ export async function getDealerReputation(dealerId: string): Promise<DealerReput
   const strikeCount = health?.strikeCount ?? 0;
   const totalComplaints = complaintStats.total;
 
-  const detail = computeDealerScore({
+  const scoreInput: DealerScoreInput = {
     verified,
     activeListings: active.length,
     listingsWithEnoughPhotos,
@@ -70,7 +71,9 @@ export async function getDealerReputation(dealerId: string): Promise<DealerReput
     openComplaints: complaintStats.open,
     resolvedComplaints: complaintStats.resolved,
     strikeCount,
-  });
+  };
+  const detail = computeDealerScore(scoreInput);
+  const explanation = explainDealerScore(scoreInput);
 
   const responseRate = totalLeads > 0 ? respondedLeads / totalLeads : null;
 
@@ -92,6 +95,7 @@ export async function getDealerReputation(dealerId: string): Promise<DealerReput
     band: detail.band,
     reviewConfidence: detail.reviewConfidence,
     badges,
+    explanation,
     metrics: {
       activeListings: active.length,
       totalListings: cars.length,
@@ -120,19 +124,70 @@ export async function recomputeDealerScore(dealerId: string): Promise<void> {
       `UPDATE dealers SET score = $1, score_updated_at = NOW() WHERE id = $2`,
       [rep.score, dealerId],
     );
+    await recordDealerMilestones(dealerId, rep);
   } catch {
     /* non-fatal */
   }
 }
 
+// ── Trust timeline (historical milestones) ───────────────────
+
+export interface Milestone {
+  type: string;
+  threshold: number;
+  label: string;
+  createdAt: string;
+}
+
+const ENQUIRY_TIERS = [10, 50, 100, 250, 500];
+const REVIEW_TIERS = [5, 25, 50, 100];
+const SCORE_TIERS: { at: number; label: string }[] = [
+  { at: 80, label: "Earned Trusted Dealer" },
+  { at: 85, label: "Reached Dealer Score 85" },
+  { at: 90, label: "Reached Dealer Score 90" },
+];
+
+// Stamp any newly-crossed milestones. Idempotent via the unique index — a
+// milestone keeps the timestamp of when it was FIRST recorded.
+export async function recordDealerMilestones(
+  dealerId: string, rep: DealerReputation,
+): Promise<void> {
+  const rows: { type: string; threshold: number; label: string }[] = [];
+  for (const t of ENQUIRY_TIERS) {
+    if (rep.metrics.totalLeads >= t) rows.push({ type: "enquiries", threshold: t, label: `Reached ${t} enquiries handled` });
+  }
+  for (const t of REVIEW_TIERS) {
+    if (rep.metrics.reviewCount >= t) rows.push({ type: "reviews", threshold: t, label: `Collected ${t} reviews` });
+  }
+  for (const s of SCORE_TIERS) {
+    if (rep.score >= s.at) rows.push({ type: "score", threshold: s.at, label: s.label });
+  }
+  for (const r of rows) {
+    await query(
+      `INSERT INTO dealer_milestones (dealer_id, type, threshold, label)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (dealer_id, type, threshold) DO NOTHING`,
+      [dealerId, r.type, r.threshold, r.label],
+    ).catch(() => {});
+  }
+}
+
+export async function getDealerMilestones(dealerId: string): Promise<Milestone[]> {
+  return query<Milestone>(
+    `SELECT type, threshold, label, created_at AS "createdAt"
+     FROM dealer_milestones WHERE dealer_id = $1 ORDER BY created_at ASC`,
+    [dealerId],
+  );
+}
+
 // Ranking is only meaningful at scale. Gate it until the marketplace has
-// enough approved dealers; real percentile computation lands once there's a
-// population to rank against.
+// enough approved, scored dealers for a percentile to mean anything.
 export const RANKING_MIN_DEALERS = 10;
 
 export interface DealerRanking {
   unlocked: boolean;
-  totalDealers: number;
+  totalDealers: number;       // approved dealers with a computed score
+  topPercent: number | null;  // e.g. 3 => "Top 3%"; null until unlocked
 }
 
 export interface TrustedDealer {
@@ -172,10 +227,21 @@ export async function getTopTrustedDealers(limit = 6): Promise<TrustedDealer[]> 
   }));
 }
 
-export async function getDealerRanking(): Promise<DealerRanking> {
-  const rows = await query<{ count: string }>(
-    `SELECT COUNT(*)::TEXT AS count FROM dealers WHERE status = 'approved'`,
+// Percentile of a dealer's score among all scored, approved dealers. Lower
+// topPercent is better (Top 3% beats Top 25%). Counts dealers scoring >= mine
+// so the best dealer is Top 1%, never Top 0%.
+export async function getDealerRanking(myScore: number): Promise<DealerRanking> {
+  const rows = await query<{ total: string; atOrAbove: string }>(
+    `SELECT COUNT(*)::TEXT AS total,
+            COUNT(*) FILTER (WHERE score >= $1)::TEXT AS "atOrAbove"
+     FROM dealers WHERE status = 'approved' AND score IS NOT NULL`,
+    [myScore],
   );
-  const totalDealers = Number(rows[0]?.count ?? 0);
-  return { unlocked: totalDealers >= RANKING_MIN_DEALERS, totalDealers };
+  const totalDealers = Number(rows[0]?.total ?? 0);
+  const atOrAbove = Number(rows[0]?.atOrAbove ?? 0);
+  const unlocked = totalDealers >= RANKING_MIN_DEALERS;
+  const topPercent = unlocked && totalDealers > 0
+    ? Math.max(1, Math.round((atOrAbove / totalDealers) * 100))
+    : null;
+  return { unlocked, totalDealers, topPercent };
 }

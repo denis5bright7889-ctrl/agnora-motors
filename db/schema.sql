@@ -842,3 +842,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dealers_slug ON dealers(slug);
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS score            INTEGER;
 ALTER TABLE dealers ADD COLUMN IF NOT EXISTS score_updated_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_dealers_score ON dealers(score DESC NULLS LAST);
+
+-- Historical trust timeline (Phase 5.2). Each milestone is stamped when first
+-- crossed; the unique index makes recording idempotent on recompute.
+CREATE TABLE IF NOT EXISTS dealer_milestones (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  dealer_id  UUID REFERENCES dealers(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL,                 -- verified | enquiries | reviews | score
+  threshold  INTEGER NOT NULL DEFAULT 0,
+  label      TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dealer_milestones_uniq ON dealer_milestones(dealer_id, type, threshold);
+CREATE INDEX IF NOT EXISTS idx_dealer_milestones_dealer ON dealer_milestones(dealer_id, created_at);

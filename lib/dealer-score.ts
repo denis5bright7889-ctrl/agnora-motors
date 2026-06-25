@@ -118,6 +118,49 @@ export interface BadgeInput {
 
 export interface Badge { id: string; label: string }
 
+// ── Score explanation ────────────────────────────────────────
+// Turns the score into a coaching tool: what's working, what to fix. Derived
+// from the same inputs as the score so it always agrees with the number.
+
+export interface ScoreExplanation {
+  strengths: string[];
+  improvements: string[];
+}
+
+export function explainDealerScore(i: DealerScoreInput): ScoreExplanation {
+  const strengths: string[] = [];
+  const improvements: string[] = [];
+
+  if (i.verified) strengths.push("Verified business");
+  else improvements.push("Complete dealer verification");
+
+  const qualityRatio = i.activeListings > 0 ? i.listingsWithEnoughPhotos / i.activeListings : 1;
+  if (i.activeListings > 0) {
+    if (qualityRatio >= 0.8) strengths.push("High-quality listings with enough photos");
+    else improvements.push(`Add more photos — aim for ${MIN_PHOTOS}+ per listing`);
+  }
+
+  if (i.totalLeads > 0) {
+    const responseRate = i.respondedLeads / i.totalLeads;
+    if (responseRate >= 0.8) strengths.push("Fast, consistent responses to buyers");
+    else improvements.push("Respond to more of your leads");
+  }
+
+  if (i.totalViews >= 30) {
+    const conv = i.totalLeads / i.totalViews;
+    if (conv >= 0.05) strengths.push("Strong view-to-lead conversion");
+    else improvements.push("Improve listing appeal (price, photos, description) to convert views");
+  }
+
+  if (i.reviewCount >= 5 && i.reviewAverage >= 4) strengths.push("Strong customer reviews");
+  else improvements.push("Collect more reviews from happy buyers");
+
+  if (i.openComplaints > 0) improvements.push("Resolve your open complaints");
+  if (i.strikeCount > 0) improvements.push("Avoid policy strikes — review listing guidelines");
+
+  return { strengths, improvements };
+}
+
 export function computeDealerBadges(b: BadgeInput): Badge[] {
   const out: Badge[] = [];
   if (b.verified) out.push({ id: "verified", label: "Verified Business" });

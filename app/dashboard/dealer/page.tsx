@@ -33,7 +33,7 @@ export default async function DealerHomePage() {
   let suspended = false;
   let pending = false;
   let rep: DealerReputation | null = null;
-  let ranking: { unlocked: boolean; totalDealers: number } | null = null;
+  let ranking: { unlocked: boolean; totalDealers: number; topPercent: number | null } | null = null;
 
   if (isDbConfigured() && session.user.role === "dealer") {
     const dealer = await getDealerByUserId(session.user.id);
@@ -41,13 +41,12 @@ export default async function DealerHomePage() {
     verified = dealer.status === "approved";
     pending = dealer.status === "pending";
 
-    const [carsRes, leads, views, health, reputation, rank] = await Promise.all([
+    const [carsRes, leads, views, health, reputation] = await Promise.all([
       getDealerCars(dealer.id),
       getDealerLeads(dealer.id),
       getDealerDailyViews(dealer.id, 14),
       getDealerAccountHealth(dealer.id),
       getDealerReputation(dealer.id),
-      getDealerRanking(),
     ]);
     cars = carsRes;
     leadCount = leads.length;
@@ -58,7 +57,8 @@ export default async function DealerHomePage() {
     lastStrikeAt = health?.lastStrikeAt ?? null;
     suspended = health ? !health.isActive : false;
     rep = reputation;
-    ranking = rank;
+    // Percentile needs the score, so it runs after reputation resolves.
+    ranking = await getDealerRanking(reputation.score);
   }
 
   const responseRate = leadCount > 0 ? `${Math.round((respondedCount / leadCount) * 100)}%` : "—";
@@ -122,11 +122,51 @@ export default async function DealerHomePage() {
               <Award className="h-3.5 w-3.5" /> {b.label}
             </span>
           ))}
-          {ranking && !ranking.unlocked && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted">
-              Ranking unlocks at {10 - ranking.totalDealers > 0 ? `${10 - ranking.totalDealers} more dealers` : "10 dealers"}
+          {ranking?.unlocked && ranking.topPercent !== null ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft px-3 py-1.5 text-xs font-semibold text-accent">
+              <TrendingUp className="h-3.5 w-3.5" /> Top {ranking.topPercent}% of dealers
             </span>
-          )}
+          ) : ranking && !ranking.unlocked ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted">
+              Ranking unlocks at {Math.max(10 - ranking.totalDealers, 0) > 0 ? `${10 - ranking.totalDealers} more dealers` : "10 dealers"}
+            </span>
+          ) : null}
+        </div>
+      )}
+
+      {/* Score explanation — coaching, not just a number */}
+      {rep && (rep.explanation.strengths.length > 0 || rep.explanation.improvements.length > 0) && (
+        <div className="rounded-2xl border border-border bg-surface p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <Gauge className="h-4 w-4 text-muted" />
+            <h2 className="font-semibold text-sm">Your Dealer Score: {score}/100 · {band}</h2>
+          </div>
+          <div className="grid gap-5 sm:grid-cols-2">
+            {rep.explanation.strengths.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-green-600 dark:text-green-400 mb-2">Strong</p>
+                <ul className="space-y-1.5">
+                  {rep.explanation.strengths.map((s) => (
+                    <li key={s} className="flex items-start gap-2 text-sm">
+                      <ShieldCheck className="h-4 w-4 text-green-500 shrink-0 mt-0.5" /> {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {rep.explanation.improvements.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-2">Needs improvement</p>
+                <ul className="space-y-1.5">
+                  {rep.explanation.improvements.map((s) => (
+                    <li key={s} className="flex items-start gap-2 text-sm text-muted">
+                      <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" /> {s}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

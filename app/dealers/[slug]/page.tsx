@@ -8,7 +8,7 @@ import {
 import {
   getDealerProfileBySlug, getDealerCars, isDbConfigured,
 } from "@/lib/db";
-import { getDealerReputation } from "@/lib/reputation";
+import { getDealerReputation, getDealerMilestones } from "@/lib/reputation";
 import { getDealerReviews } from "@/lib/trust";
 import { ProfileViewTracker } from "@/components/dealers/profile-view-tracker";
 import { formatPrice, cn } from "@/lib/utils";
@@ -25,10 +25,11 @@ export default async function DealerProfilePage({
   // Only approved dealers get a public profile.
   if (!dealer || dealer.status !== "approved") notFound();
 
-  const [rep, reviews, cars] = await Promise.all([
+  const [rep, reviews, cars, milestones] = await Promise.all([
     getDealerReputation(dealer.id),
     getDealerReviews(dealer.id, 10),
     getDealerCars(dealer.id),
+    getDealerMilestones(dealer.id),
   ]);
   const listings = cars.filter((c) => c.status === "active");
   const { metrics: m } = rep;
@@ -76,22 +77,31 @@ export default async function DealerProfilePage({
             </div>
           )}
 
-          {/* Trust timeline */}
+          {/* Trust timeline — real, dated milestones; derived fallback when none yet */}
           <section>
             <h2 className="font-semibold mb-3">Trust timeline</h2>
             <ol className="relative border-l border-border ml-1.5 space-y-4">
-              {[
-                { label: `Joined Agnora`, date: memberSince },
-                { label: "Verified business", date: null },
-                ...(m.reviewCount > 0 ? [{ label: `${m.reviewCount} review${m.reviewCount === 1 ? "" : "s"} collected`, date: null }] : []),
-                ...(m.totalLeads > 0 ? [{ label: `${m.totalLeads} enquir${m.totalLeads === 1 ? "y" : "ies"} handled`, date: null }] : []),
-              ].map((item) => (
-                <li key={item.label} className="ml-4">
-                  <span className="absolute -left-[5px] h-2.5 w-2.5 rounded-full bg-accent" />
-                  <p className="text-sm font-medium">{item.label}</p>
-                  {item.date && <p className="text-xs text-muted">{item.date}</p>}
-                </li>
-              ))}
+              {(() => {
+                const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-KE", { month: "short", year: "numeric" });
+                const items: { label: string; date: string | null }[] = [
+                  { label: "Joined Agnora", date: memberSince },
+                ];
+                if (milestones.length > 0) {
+                  for (const ms of milestones) items.push({ label: ms.label, date: fmt(ms.createdAt) });
+                } else {
+                  // Nothing recorded yet — show what we can derive (no dates).
+                  items.push({ label: "Verified business", date: null });
+                  if (m.reviewCount > 0) items.push({ label: `${m.reviewCount} review${m.reviewCount === 1 ? "" : "s"} collected`, date: null });
+                  if (m.totalLeads > 0) items.push({ label: `${m.totalLeads} enquir${m.totalLeads === 1 ? "y" : "ies"} handled`, date: null });
+                }
+                return items.map((item, i) => (
+                  <li key={`${item.label}-${i}`} className="ml-4">
+                    <span className="absolute -left-[5px] h-2.5 w-2.5 rounded-full bg-accent" />
+                    <p className="text-sm font-medium">{item.label}</p>
+                    {item.date && <p className="text-xs text-muted">{item.date}</p>}
+                  </li>
+                ));
+              })()}
             </ol>
           </section>
 

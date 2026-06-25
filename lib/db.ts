@@ -471,6 +471,13 @@ export async function updateDealerStatus(
        WHERE id = (SELECT user_id FROM dealers WHERE id = $1)`,
       [id],
     );
+    // Stamp the "verified" trust-timeline milestone (idempotent).
+    await query(
+      `INSERT INTO dealer_milestones (dealer_id, type, threshold, label)
+       VALUES ($1, 'verified', 0, 'Verified business')
+       ON CONFLICT (dealer_id, type, threshold) DO NOTHING`,
+      [id],
+    ).catch(() => {});
   }
 }
 
