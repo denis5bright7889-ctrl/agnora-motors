@@ -1188,6 +1188,58 @@ export async function getAdminStats() {
   };
 }
 
+// Executive marketplace-health KPIs (V10000 capstone). One round-trip of
+// subselects — meant for the platform admin to watch whether the marketplace
+// is getting healthier over time, not a per-dealer feature.
+export interface MarketplaceHealth {
+  activeDealers: number;
+  activeListings: number;
+  listingViews: number;
+  contactOpens: number;
+  leads: number;
+  wonLeads: number;
+  leadConversion: number | null;     // won / leads (0–1)
+  avgDealerScore: number | null;
+  avgResponseHours: number | null;
+  avgResolutionHours: number | null;
+}
+
+export async function getMarketplaceHealth(): Promise<MarketplaceHealth> {
+  const rows = await query<{
+    activeDealers: string; activeListings: string; listingViews: string;
+    contactOpens: string; leads: string; wonLeads: string;
+    avgScore: string | null; avgResponseSecs: string | null; avgResolutionSecs: string | null;
+  }>(
+    `SELECT
+       (SELECT COUNT(*) FROM dealers WHERE status = 'approved' AND is_active)::TEXT AS "activeDealers",
+       (SELECT COUNT(*) FROM cars WHERE status = 'active')::TEXT AS "activeListings",
+       (SELECT COUNT(*) FROM car_views)::TEXT AS "listingViews",
+       (SELECT COUNT(*) FROM analytics_events WHERE name = 'contact_form_open')::TEXT AS "contactOpens",
+       (SELECT COUNT(*) FROM contact_requests)::TEXT AS "leads",
+       (SELECT COUNT(*) FROM contact_requests WHERE status = 'won')::TEXT AS "wonLeads",
+       (SELECT AVG(score) FROM dealers WHERE score IS NOT NULL)::TEXT AS "avgScore",
+       (SELECT AVG(EXTRACT(EPOCH FROM (last_contact_at - created_at)))
+          FROM contact_requests WHERE last_contact_at IS NOT NULL)::TEXT AS "avgResponseSecs",
+       (SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))
+          FROM complaints WHERE status IN ('resolved', 'dismissed'))::TEXT AS "avgResolutionSecs"`,
+  );
+  const r = rows[0];
+  const leads = Number(r?.leads ?? 0);
+  const wonLeads = Number(r?.wonLeads ?? 0);
+  return {
+    activeDealers:  Number(r?.activeDealers ?? 0),
+    activeListings: Number(r?.activeListings ?? 0),
+    listingViews:   Number(r?.listingViews ?? 0),
+    contactOpens:   Number(r?.contactOpens ?? 0),
+    leads,
+    wonLeads,
+    leadConversion: leads > 0 ? wonLeads / leads : null,
+    avgDealerScore: r?.avgScore != null ? Number(r.avgScore) : null,
+    avgResponseHours: r?.avgResponseSecs != null ? Number(r.avgResponseSecs) / 3600 : null,
+    avgResolutionHours: r?.avgResolutionSecs != null ? Number(r.avgResolutionSecs) / 3600 : null,
+  };
+}
+
 export async function getTopSearchedMakes(limit = 8) {
   return query<{ make: string; count: string }>(
     `SELECT make, COUNT(*)::TEXT AS count

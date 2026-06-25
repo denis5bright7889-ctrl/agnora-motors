@@ -16,10 +16,12 @@ import {
   ChevronRight,
   Newspaper,
   ScrollText,
+  Activity,
 } from "lucide-react";
 
 const navItems = [
   { href: "/admin",           label: "Overview",  icon: LayoutDashboard, exact: true },
+  { href: "/admin/health",    label: "Health",    icon: Activity },
   { href: "/admin/dealers",   label: "Dealers",   icon: ShieldCheck },
   { href: "/admin/sellers",   label: "Sellers",   icon: UserCheck },
   { href: "/admin/cars",      label: "Listings",  icon: Car },
