@@ -9,6 +9,7 @@ import {
   Zap, type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { NotificationBell } from "@/components/dashboard/notification-bell";
 
 export type DashboardVariant = "dealer" | "seller";
 
@@ -85,10 +86,11 @@ export function DashboardShell({
             <div className="h-9 w-9 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
               <span className="text-accent font-bold text-sm">{initial}</span>
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="font-semibold text-sm truncate">{identity.name}</p>
               <p className="text-xs text-muted capitalize">{identity.roleLabel}</p>
             </div>
+            <NotificationBell />
           </div>
 
           <div className={cn(
@@ -165,6 +167,7 @@ export function DashboardShell({
             <p className="font-semibold text-sm truncate">{identity.name}</p>
             <span className="text-[10px] font-semibold capitalize text-muted">{identity.roleLabel}</span>
           </div>
+          <NotificationBell />
           <Link
             href="/dealer/listings/new"
             className="inline-flex h-8 items-center gap-1 rounded-full bg-accent px-3 text-xs font-semibold text-white shrink-0"

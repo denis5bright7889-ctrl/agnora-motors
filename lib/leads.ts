@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { createNotification } from "@/lib/notifications";
 
 // ── Pipeline ─────────────────────────────────────────────────
 
@@ -108,13 +109,21 @@ export type CreateLeadResult =
 // car so the lead lands in that dealer's CRM, stamps source attribution, and
 // (for dealer-owned cars) opens the activity timeline with a "created" entry.
 export async function createLead(input: CreateLeadInput): Promise<CreateLeadResult> {
-  const carRows = await query<{ dealerId: string | null }>(
-    `SELECT dealer_id AS "dealerId" FROM cars WHERE id = $1 LIMIT 1`,
+  const carRows = await query<{
+    dealerId: string | null; sellerUserId: string | null; dealerUserId: string | null;
+    make: string; model: string; year: number;
+  }>(
+    `SELECT c.dealer_id AS "dealerId", c.seller_user_id AS "sellerUserId",
+            c.make, c.model, c.year, d.user_id AS "dealerUserId"
+     FROM cars c
+     LEFT JOIN dealers d ON d.id = c.dealer_id
+     WHERE c.id = $1 LIMIT 1`,
     [input.carId],
   );
   if (carRows.length === 0) return { ok: false, reason: "car_not_found" };
 
-  const dealerId = carRows[0].dealerId;
+  const car = carRows[0];
+  const dealerId = car.dealerId;
   const source = normalizeSource(input.source);
 
   const rows = await query<{ id: string }>(
@@ -134,6 +143,19 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
       `INSERT INTO lead_activity (lead_id, dealer_id, type, detail) VALUES ($1, $2, 'created', $3)`,
       [id, dealerId, JSON.stringify({ source })],
     );
+  }
+
+  // Notify the listing's owner (dealer's user, or the private seller). Never
+  // let a notification failure roll back the lead — it's best-effort.
+  const recipient = car.dealerUserId ?? car.sellerUserId;
+  if (recipient) {
+    const href = car.dealerUserId ? "/dashboard/dealer/leads" : "/dashboard/seller";
+    await createNotification(recipient, {
+      type: "new_lead",
+      title: "New lead",
+      body: `${input.buyerName} is interested in your ${car.year} ${car.make} ${car.model}`,
+      href,
+    }).catch(() => {});
   }
 
   return { ok: true, id, dealerId };
@@ -243,6 +265,18 @@ export async function createDealerTask(
     await addActivity(opts.leadId, dealerId, "task_added", { title: opts.title });
   }
   return rows[0];
+}
+
+// Open tasks whose due date has passed — surfaced as notification reminders.
+export async function getDueDealerTasks(dealerId: string): Promise<DealerTask[]> {
+  return query<DealerTask>(
+    `SELECT id, dealer_id AS "dealerId", lead_id AS "leadId", title, done,
+            due_at AS "dueAt", created_at AS "createdAt"
+     FROM dealer_tasks
+     WHERE dealer_id = $1 AND done = FALSE AND due_at IS NOT NULL AND due_at <= NOW()
+     ORDER BY due_at ASC`,
+    [dealerId],
+  );
 }
 
 export async function setTaskDone(id: string, dealerId: string, done: boolean): Promise<void> {

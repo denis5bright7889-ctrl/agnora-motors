@@ -768,3 +768,20 @@ CREATE TABLE IF NOT EXISTS dealer_tasks (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_dealer_tasks_dealer ON dealer_tasks(dealer_id, done, created_at DESC);
+
+-- ============================================================
+-- Notifications (Agnora V10000 Phase 2.5)
+-- ============================================================
+-- Per-user, event-driven (new lead today; reviews/complaints/expiry later).
+-- read_at NULL = unread. href deep-links into the dashboard.
+CREATE TABLE IF NOT EXISTS notifications (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    TEXT REFERENCES users(id) ON DELETE CASCADE,
+  type       TEXT NOT NULL,                       -- new_lead | review | complaint | listing_expiring | system
+  title      TEXT NOT NULL,
+  body       TEXT,
+  href       TEXT,
+  read_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, read_at, created_at DESC);
