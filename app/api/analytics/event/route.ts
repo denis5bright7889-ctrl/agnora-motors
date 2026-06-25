@@ -27,6 +27,16 @@ function readClientIp(req: Request): string | null {
   return req.headers.get("x-real-ip");
 }
 
+// Coarse device class from the User-Agent. Honest buckets only — we don't
+// infer a county (that needs geo-IP we don't run yet).
+function deviceFromUA(ua: string | null): "mobile" | "tablet" | "desktop" | "unknown" {
+  if (!ua) return "unknown";
+  const s = ua.toLowerCase();
+  if (/ipad|tablet|playbook|silk|android(?!.*mobi)/.test(s)) return "tablet";
+  if (/mobi|iphone|ipod|android|blackberry|iemobile|opera mini/.test(s)) return "mobile";
+  return "desktop";
+}
+
 export async function POST(req: Request) {
   // Body parse — be very tolerant. Anything weird → silent 204.
   let body: { name?: string; props?: Record<string, unknown>; path?: string; sessionId?: string } = {};
@@ -43,7 +53,10 @@ export async function POST(req: Request) {
   const name = typeof body.name === "string" ? body.name.slice(0, MAX_NAME_LEN) : "";
   if (!name) return new NextResponse(null, { status: 204 });
 
-  const props = (body.props && typeof body.props === "object") ? body.props : {};
+  const rawProps = (body.props && typeof body.props === "object") ? body.props : {};
+  // Server-side enrichment: stamp the device class so the client can't spoof
+  // it and every event carries it for audience breakdowns.
+  const props = { ...rawProps, device: deviceFromUA(req.headers.get("user-agent")) };
   const path  = typeof body.path === "string" ? body.path.slice(0, 200) : null;
 
   // Hash IP + session for de-dupe / distinct counts without storing PII.

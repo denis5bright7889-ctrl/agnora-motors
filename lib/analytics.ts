@@ -6,8 +6,13 @@ export type AnalyticsEvent =
   | "search_suggestion_shown"
   | "search_suggestion_clicked"
   | "search_submitted"
-  // Listing funnel (PR8)
+  // Listing funnel (PR8 + V10000 Phase 2.6)
   | "listing_viewed"
+  | "contact_form_open"   // buyer opened the "Message dealer" modal
+  | "phone_reveal"        // buyer tapped the dealer phone number
+  | "whatsapp_click"      // reserved — no surface yet
+  | "vehicle_share"       // reserved — no surface yet
+  | "dealer_profile_view" // reserved — no dealer profile page yet
   | "contact_request_created"
   // Seller funnel — usage of the optional Technical specifications panel.
   // Fired on POST success when the seller filled at least one spec field.

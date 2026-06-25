@@ -23,18 +23,31 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
   useEffect(() => {
     if (!car) return;
     trackEvent("listing_viewed", {
-      carId:      car.id,
-      slug:       car.slug,
-      make:       car.make,
-      model:      car.model,
-      year:       car.year,
-      price:      car.price,
-      condition:  car.condition,
-      verified:   car.verified,
-      priceTier:  car.priceTier,
-      sellerType: car.sellerType,
+      carId:         car.id,
+      slug:          car.slug,
+      make:          car.make,
+      model:         car.model,
+      year:          car.year,
+      price:         car.price,
+      condition:     car.condition,
+      verified:      car.verified,
+      priceTier:     car.priceTier,
+      sellerType:    car.sellerType,
+      listingCounty: car.location,
     });
   }, [car]);
+
+  // Funnel events. contact_form_open precedes lead_created; phone_reveal is a
+  // separate intent signal (buyer chose to call instead of message).
+  function openContact() {
+    trackEvent("contact_form_open", {
+      carId: car!.id, sellerType: car!.sellerType, source: "vehicle_page",
+    });
+    setContactOpen(true);
+  }
+  function revealPhone() {
+    trackEvent("phone_reveal", { carId: car!.id, sellerType: car!.sellerType });
+  }
 
   function handleTouchStart(e: React.TouchEvent) {
     touchStartX.current = e.touches[0].clientX;
@@ -330,7 +343,7 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
                 <div className="mt-6 space-y-3">
                   <button
                     type="button"
-                    onClick={() => setContactOpen(true)}
+                    onClick={openContact}
                     className="w-full h-12 rounded-full bg-accent text-white text-sm font-semibold hover:opacity-90 transition-opacity"
                   >
                     <MessageCircle className="inline h-4 w-4 mr-2" />
@@ -338,6 +351,7 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
                   </button>
                   <a
                     href={`tel:${car!.dealer.phone}`}
+                    onClick={revealPhone}
                     className="flex h-12 items-center justify-center gap-2 rounded-full border border-border bg-surface-2 text-sm font-medium hover:bg-surface transition-colors"
                   >
                     <Phone className="h-4 w-4" />
@@ -407,6 +421,7 @@ export function CarDetail({ car, similar }: { car: CarType; similar: CarType[] }
           </div>
           <a
             href={`tel:${car!.dealer.phone}`}
+            onClick={revealPhone}
             className="shrink-0 flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-2 transition-colors hover:bg-surface"
             aria-label="Call dealer"
           >

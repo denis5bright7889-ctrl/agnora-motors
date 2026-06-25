@@ -1,5 +1,6 @@
 import { query } from "@/lib/db";
 import { createNotification } from "@/lib/notifications";
+import { logServerEvent } from "@/lib/analytics-server";
 
 // ── Pipeline ─────────────────────────────────────────────────
 
@@ -158,6 +159,9 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
     }).catch(() => {});
   }
 
+  // Funnel analytics — server-side so it can't be missed or spoofed.
+  await logServerEvent("lead_created", { carId: input.carId, dealerId, source });
+
   return { ok: true, id, dealerId };
 }
 
@@ -222,6 +226,9 @@ export async function updateLeadStatus(
     [status, id, dealerId],
   );
   await addActivity(id, dealerId, "status_changed", { from: existing.status, to: status });
+  await logServerEvent("lead_stage_changed", {
+    leadId: id, dealerId, from: existing.status, to: status,
+  });
   return getLeadById(id, dealerId);
 }
 
