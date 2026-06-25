@@ -28,7 +28,7 @@ const NAV: Record<DashboardVariant, NavItem[]> = {
     { href: "/dealer/listings",      label: "Inventory",    icon: Car },
     { href: "/dealer/listings/new",  label: "Add Car",      icon: PlusCircle },
     { href: "/dashboard/dealer/leads", label: "Leads",      icon: MessageCircle },
-    { href: "/dealer/analytics",     label: "Analytics",    icon: BarChart3 },
+    { href: "/dashboard/dealer/analytics", label: "Performance", icon: BarChart3 },
     { href: "/dealer/subscription",  label: "Subscription", icon: CreditCard },
   ],
   seller: [
