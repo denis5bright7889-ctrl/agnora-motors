@@ -145,7 +145,7 @@ export default function PublicListingPage() {
   // VIN decoder state. `decode` is the result of the last attempt (null
   // before first attempt), `decoding` is the in-flight flag.
   const [decoding, setDecoding]       = useState(false);
-  const [decode, setDecode]           = useState<null | { decoded: boolean; source: string; fields: DecodedVehicle; applied: string[] }>(null);
+  const [decode, setDecode]           = useState<null | { decoded: boolean; source: string; fields: DecodedVehicle; applied: string[]; couldNotDetermine: string[]; isEv: boolean; country?: string }>(null);
   const [decodeError, setDecodeError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -296,15 +296,20 @@ export default function PublicListingPage() {
         decoded: !!json.decoded,
         source:  String(json.source ?? "manual"),
         fields:  (json.fields ?? {}) as DecodedVehicle,
+        couldNotDetermine: (json.couldNotDetermine ?? []) as string[],
+        isEv:    !!json.isEv,
+        country: json.country as string | undefined,
       };
       trackEvent("vin_decode_succeeded", {
         source:        result.source,
         matchedFields: Object.keys(result.fields),
       });
 
-      // On a successful match: auto-apply right away. The seller sees the
-      // result in the form fields below the VIN immediately.
-      const applied = result.decoded ? applyToEmptyFields(result.fields) : [];
+      // Apply whatever we could source — even a partial decode (e.g. make +
+      // year from manufacturer rules on a JDM import) is useful. We never
+      // overwrite a manual edit, and the decoder never guesses fields it
+      // can't source, so applying is always safe.
+      const applied = applyToEmptyFields(result.fields);
       setDecode({ ...result, applied });
       if (applied.length > 0) {
         trackEvent("vin_decode_applied", { appliedFields: applied });
@@ -603,8 +608,8 @@ export default function PublicListingPage() {
                       </div>
                     )}
 
-                    {/* No-match banner — JDM imports are normal */}
-                    {decode && !decode.decoded && (
+                    {/* True no-match — we couldn't even derive make/year. */}
+                    {decode && !decode.decoded && decode.applied.length === 0 && !decode.fields.make && !decode.fields.year && (
                       <div className="mt-3 flex items-start gap-3 rounded-xl border border-border bg-surface-2 px-3 py-2.5">
                         <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-muted" />
                         <div className="flex-1 min-w-0">
@@ -624,9 +629,10 @@ export default function PublicListingPage() {
                       </div>
                     )}
 
-                    {/* Match banner — confirmation of what was auto-filled.
-                        We've already mutated the form by the time this renders. */}
-                    {decode && decode.decoded && (
+                    {/* Result banner — full OR partial. Even make+year from
+                        manufacturer rules is shown, with an explicit list of
+                        what we COULDN'T determine so the seller verifies it. */}
+                    {decode && (decode.decoded || decode.applied.length > 0 || !!decode.fields.make || !!decode.fields.year) && (
                       <div className="mt-3 rounded-xl border border-accent/30 bg-accent-soft/40 p-3 sm:p-4">
                         <div className="flex items-start gap-3">
                           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent text-white">
@@ -636,11 +642,12 @@ export default function PublicListingPage() {
                             <p className="text-xs font-semibold uppercase tracking-widest text-accent">
                               {decode.applied.length > 0
                                 ? `${decode.applied.length} field${decode.applied.length === 1 ? "" : "s"} filled from your VIN`
-                                : "VIN matched"}
+                                : "VIN read"}
                             </p>
                             <p className="text-sm font-display font-medium mt-0.5 tracking-tight">
                               {[decode.fields.year, decode.fields.make, decode.fields.model].filter(Boolean).join(" ") || "Unknown vehicle"}
                               {decode.fields.trim && <span className="text-muted font-normal ml-1.5">· {decode.fields.trim}</span>}
+                              {decode.isEv && <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent align-middle">EV</span>}
                             </p>
                             <DecodedFactList fields={decode.fields} />
                             {decode.applied.length > 0 && (
@@ -651,6 +658,12 @@ export default function PublicListingPage() {
                             {decode.applied.length === 0 && (
                               <p className="mt-2 text-[11px] text-muted leading-relaxed">
                                 You'd already filled these fields manually — we didn't overwrite anything.
+                              </p>
+                            )}
+                            {decode.couldNotDetermine.length > 0 && (
+                              <p className="mt-1.5 flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
+                                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-px" />
+                                <span>Couldn't determine — please verify: {decode.couldNotDetermine.join(" · ")}.</span>
                               </p>
                             )}
                           </div>

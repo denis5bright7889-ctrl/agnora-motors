@@ -21,11 +21,10 @@ export async function GET(req: Request) {
 
   try {
     const result = await decodeVin(vin);
-    // Strip raw upstream payload in production — it's only useful for
-    // debugging the mapper and would balloon every response by ~30 KB.
-    const body = process.env.NODE_ENV === "production"
-      ? { decoded: result.decoded, source: result.source, vin: result.vin, fields: result.fields }
-      : result;
+    // Strip only the raw upstream payload in production (it's ~30 KB of
+    // debug data); keep the confidence / gaps / EV signals the UI needs.
+    const body = { ...result };
+    if (process.env.NODE_ENV === "production") delete (body as { raw?: unknown }).raw;
     return NextResponse.json(body);
   } catch (err) {
     console.error("[GET /api/vin/decode]", err);

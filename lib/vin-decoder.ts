@@ -32,44 +32,196 @@ export interface DecodedVehicle {
   horsepower?:   number;
 }
 
-export type DecoderSource = "nhtsa" | "cache" | "manual";
+export type DecoderSource = "nhtsa" | "wmi" | "cache" | "manual";
+
+export type Confidence = "high" | "medium" | "low";
 
 export interface DecodeResult {
   decoded: boolean;           // true iff at least year+make+model were found
   source:  DecoderSource;
   vin:     string;            // echoed back, uppercased
   fields:  DecodedVehicle;    // ready for setValue()
+  // Per-field confidence so the UI can flag low-confidence values for review
+  // instead of presenting everything as equally certain.
+  confidence: Partial<Record<keyof DecodedVehicle, Confidence>>;
+  // Human labels of important fields we could NOT determine — the form asks
+  // the seller to fill these rather than us guessing.
+  couldNotDetermine: string[];
+  isEv:    boolean;           // electric — never claim engine displacement
+  country?: string;           // derived from the VIN's first character (WMI)
   raw?:    unknown;           // upstream payload — only for diagnostics in dev
 }
 
 // ─── Public entry point ─────────────────────────────────────────────────────
+//
+// Decode order: cache → NHTSA → (always) manufacturer (WMI) rules. The WMI
+// layer is local and free, so it runs on EVERY decode to fill make / country
+// / year even when NHTSA returns nothing (the common case for JDM and other
+// non-US-spec imports). We never fabricate a field we can't source — anything
+// missing is reported in `couldNotDetermine` for the seller to confirm.
 
 export async function decodeVin(rawVin: string): Promise<DecodeResult> {
   const vin = normalizeVin(rawVin);
   if (vin.length < 11 || vin.length > 20) {
-    return { decoded: false, source: "manual", vin, fields: {} };
+    return finalize(vin, {}, "manual", undefined);
   }
 
   // 1. Cache. Same VIN twice = no extra network call.
   const cached = await readCache(vin);
-  if (cached) return { ...cached, source: "cache" };
+  if (cached) return finalize(vin, cached.fields, "cache", cached.raw);
 
   // 2. NHTSA primary fetch.
   const nhtsa = await fetchNhtsa(vin);
   if (nhtsa.fields && Object.keys(nhtsa.fields).length > 0) {
     await writeCache(vin, "nhtsa", nhtsa.fields, nhtsa.raw);
-    const decoded = !!(nhtsa.fields.year && nhtsa.fields.make && nhtsa.fields.model);
-    return { decoded, source: "nhtsa", vin, fields: nhtsa.fields, raw: nhtsa.raw };
+    return finalize(vin, nhtsa.fields, "nhtsa", nhtsa.raw);
   }
 
-  // 3. (Future) try JDM-specialised provider here. Return no-match for now.
-  return { decoded: false, source: "manual", vin, fields: {} };
+  // 3. NHTSA had nothing — the WMI layer inside finalize still fills make /
+  //    country / year for non-US imports.
+  return finalize(vin, {}, "manual", nhtsa.raw);
+}
+
+// ─── Finalize: merge WMI, score confidence, report gaps ─────────────────────
+
+const BASE_CONFIDENCE: Partial<Record<keyof DecodedVehicle, Confidence>> = {
+  year: "high", make: "high", model: "medium", trim: "low",
+  bodyType: "medium", fuel: "medium", transmission: "medium",
+  drivetrain: "medium", engineCc: "medium", horsepower: "low",
+};
+
+function finalize(
+  vin: string, base: DecodedVehicle, baseSource: DecoderSource, raw: unknown,
+): DecodeResult {
+  const wmi = decodeWmi(vin);
+  const fields: DecodedVehicle = { ...base };
+  const confidence: Partial<Record<keyof DecodedVehicle, Confidence>> = {};
+  for (const k of Object.keys(base) as (keyof DecodedVehicle)[]) {
+    confidence[k] = BASE_CONFIDENCE[k] ?? "medium";
+  }
+
+  // Manufacturer rules backfill make / year when the primary source missed
+  // them — high confidence for make (WMI is deterministic), medium for the
+  // position-10 year code.
+  if (!fields.make && wmi.make)  { fields.make = wmi.make; confidence.make = "high"; }
+  if (!fields.year && wmi.year)  { fields.year = wmi.year; confidence.year = "medium"; }
+
+  // Electric: trust the WMI EV flag or an explicit electric fuel. Never keep
+  // an engine displacement on an EV — ask for variant/battery instead.
+  const isEv = wmi.ev || base.fuel === "electric";
+  if (isEv) {
+    fields.fuel = "electric";
+    confidence.fuel = wmi.ev ? "high" : (confidence.fuel ?? "medium");
+    delete fields.engineCc;
+    delete confidence.engineCc;
+  }
+
+  const couldNotDetermine = missingImportant(fields, isEv);
+  const hasBase = Object.keys(base).length > 0;
+  const source: DecoderSource = hasBase
+    ? baseSource
+    : (wmi.make || wmi.year) ? "wmi" : "manual";
+  const decoded = !!(fields.year && fields.make && fields.model);
+
+  return {
+    decoded, source, vin, fields, confidence, couldNotDetermine,
+    isEv, country: wmi.country, raw,
+  };
+}
+
+// Important, form-facing fields the seller still needs to confirm.
+function missingImportant(f: DecodedVehicle, isEv: boolean): string[] {
+  const out: string[] = [];
+  if (!f.model)        out.push("Model");
+  if (!f.trim)         out.push("Trim");
+  if (!f.bodyType)     out.push("Body type");
+  if (!f.fuel)         out.push("Fuel");
+  if (!f.transmission) out.push("Transmission");
+  if (isEv)            out.push("Battery / variant");
+  else if (!f.engineCc) out.push("Engine size");
+  return out;
 }
 
 // ─── VIN normalisation ──────────────────────────────────────────────────────
 
 function normalizeVin(s: string): string {
   return (s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+// ─── Manufacturer (WMI) rules ───────────────────────────────────────────────
+// The first 3 chars (World Manufacturer Identifier) deterministically encode
+// the maker; the 1st char encodes the country/region; position 10 encodes the
+// model year. This local layer covers the Kenya-market mix (JDM, UK, EU, EV)
+// that the US-centric NHTSA database typically can't.
+
+interface WmiInfo { make: string; ev?: boolean }
+
+// Specific 3-char WMIs (checked first).
+const WMI_3: Record<string, WmiInfo> = {
+  JTH: { make: "Lexus" }, "2T2": { make: "Lexus" }, "58A": { make: "Lexus" },
+  JA3: { make: "Mitsubishi" }, JA4: { make: "Mitsubishi" }, JMB: { make: "Mitsubishi" }, JMY: { make: "Mitsubishi" },
+  JAA: { make: "Isuzu" }, JAB: { make: "Isuzu" }, JAC: { make: "Isuzu" }, JAL: { make: "Isuzu" }, MPA: { make: "Isuzu" },
+  MA3: { make: "Suzuki" }, TSM: { make: "Suzuki" },
+  SAL: { make: "Land Rover" }, SAJ: { make: "Jaguar" },
+  WF0: { make: "Ford" }, MAJ: { make: "Ford" }, "6FP": { make: "Ford" },
+  VF3: { make: "Peugeot" }, VF7: { make: "Citroen" }, VF1: { make: "Renault" },
+  "5YJ": { make: "Tesla", ev: true }, "7SA": { make: "Tesla", ev: true },
+  LRW: { make: "Tesla", ev: true }, XP7: { make: "Tesla", ev: true }, SFZ: { make: "Tesla", ev: true },
+  WP0: { make: "Porsche" }, WP1: { make: "Porsche" },
+  TRU: { make: "Audi" }, "93U": { make: "Audi" },
+};
+
+// 2-char fallback when the exact WMI isn't listed (covers a maker's many WMIs).
+const WMI_2: Record<string, string> = {
+  JT: "Toyota", SB: "Toyota", MR: "Toyota", NM: "Toyota",
+  JN: "Nissan", SJ: "Nissan", VS: "Nissan",
+  JM: "Mazda", JH: "Honda", SH: "Honda",
+  JF: "Subaru", JS: "Suzuki",
+  KM: "Hyundai", KN: "Kia",
+  WD: "Mercedes-Benz", W1: "Mercedes-Benz",
+  WB: "BMW", WA: "Audi", WV: "Volkswagen", WU: "Audi",
+  YV: "Volvo", ZF: "Fiat", ZA: "Alfa Romeo",
+};
+
+// Country/region from the first VIN character.
+const COUNTRY_BY_FIRST: Record<string, string> = {
+  J: "Japan", K: "South Korea", L: "China", M: "India / Asia", N: "Turkey / Asia",
+  S: "United Kingdom / Europe", T: "Europe", V: "France / Spain", W: "Germany",
+  X: "Russia / Europe", Y: "Sweden / Europe", Z: "Italy",
+  "1": "United States", "4": "United States", "5": "United States",
+  "2": "Canada", "3": "Mexico", "6": "Australia", "9": "Brazil",
+};
+
+interface WmiDecode { make?: string; ev?: boolean; country?: string; year?: number }
+
+function decodeWmi(vin: string): WmiDecode {
+  const out: WmiDecode = {};
+  if (vin.length >= 1) out.country = COUNTRY_BY_FIRST[vin[0]];
+  if (vin.length >= 3) {
+    const three = WMI_3[vin.slice(0, 3)];
+    if (three) { out.make = three.make; out.ev = three.ev; }
+    else {
+      const two = WMI_2[vin.slice(0, 2)];
+      if (two) out.make = two;
+    }
+  }
+  if (vin.length >= 10) {
+    const y = yearFromCode(vin[9]);
+    if (y) out.year = y;
+  }
+  return out;
+}
+
+// Position-10 model-year code. Letters → 2010–2030, digits 1–9 → 2001–2009
+// (the digit branch repeats at 2031+, but that's future-dated, so for a
+// marketplace today a digit unambiguously means 2001–2009). I/O/Q/U/Z/0 are
+// never used in this position.
+const YEAR_LETTERS = "ABCDEFGHJKLMNPRSTVWXY"; // 2010..2030
+function yearFromCode(code: string): number | undefined {
+  const i = YEAR_LETTERS.indexOf(code);
+  if (i >= 0) return 2010 + i;
+  if (/^[1-9]$/.test(code)) return 2000 + Number(code); // 2001–2009
+  return undefined;
 }
 
 // ─── NHTSA fetch + map ──────────────────────────────────────────────────────
@@ -219,16 +371,14 @@ function titleCase(s: string): string {
 
 // ─── Cache I/O ──────────────────────────────────────────────────────────────
 
-async function readCache(vin: string): Promise<DecodeResult | null> {
+async function readCache(vin: string): Promise<{ fields: DecodedVehicle; raw: unknown } | null> {
   try {
-    const rows = await query<{ source: string; fields: DecodedVehicle; raw: unknown }>(
-      `SELECT source, fields, raw FROM vin_cache WHERE vin = $1 LIMIT 1`,
+    const rows = await query<{ fields: DecodedVehicle; raw: unknown }>(
+      `SELECT fields, raw FROM vin_cache WHERE vin = $1 LIMIT 1`,
       [vin],
     );
     if (rows.length === 0) return null;
-    const r = rows[0];
-    const decoded = !!(r.fields?.year && r.fields?.make && r.fields?.model);
-    return { decoded, source: r.source as DecoderSource, vin, fields: r.fields ?? {}, raw: r.raw };
+    return { fields: rows[0].fields ?? {}, raw: rows[0].raw };
   } catch {
     // Cache miss should never block the user.
     return null;
