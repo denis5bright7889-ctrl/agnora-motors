@@ -11,6 +11,7 @@
 // the caller can splat into setValue() without per-field translation.
 
 import { query } from "@/lib/db";
+import { getApprovedCorrections, vinPrefix, type CorrectableField } from "@/lib/vin-corrections";
 import type { Fuel, Transmission, BodyType, Drivetrain } from "@/types";
 
 const NHTSA_URL = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinExtended";
@@ -49,6 +50,8 @@ export interface DecodeResult {
   couldNotDetermine: string[];
   isEv:    boolean;           // electric — never claim engine displacement
   country?: string;           // derived from the VIN's first character (WMI)
+  overallConfidence: number;  // 0–100 across key fields — quick reliability read
+  learned: boolean;           // true if an approved community correction applied
   raw?:    unknown;           // upstream payload — only for diagnostics in dev
 }
 
@@ -63,23 +66,27 @@ export interface DecodeResult {
 export async function decodeVin(rawVin: string): Promise<DecodeResult> {
   const vin = normalizeVin(rawVin);
   if (vin.length < 11 || vin.length > 20) {
-    return finalize(vin, {}, "manual", undefined);
+    return finalize(vin, {}, "manual", undefined, {});
   }
+
+  // Approved community corrections for this VIN prefix (learning loop). These
+  // override the decoder where sellers have repeatedly fixed the same field.
+  const corrections = await getApprovedCorrections(vinPrefix(vin)).catch(() => ({}));
 
   // 1. Cache. Same VIN twice = no extra network call.
   const cached = await readCache(vin);
-  if (cached) return finalize(vin, cached.fields, "cache", cached.raw);
+  if (cached) return finalize(vin, cached.fields, "cache", cached.raw, corrections);
 
   // 2. NHTSA primary fetch.
   const nhtsa = await fetchNhtsa(vin);
   if (nhtsa.fields && Object.keys(nhtsa.fields).length > 0) {
     await writeCache(vin, "nhtsa", nhtsa.fields, nhtsa.raw);
-    return finalize(vin, nhtsa.fields, "nhtsa", nhtsa.raw);
+    return finalize(vin, nhtsa.fields, "nhtsa", nhtsa.raw, corrections);
   }
 
   // 3. NHTSA had nothing — the WMI layer inside finalize still fills make /
   //    country / year for non-US imports.
-  return finalize(vin, {}, "manual", nhtsa.raw);
+  return finalize(vin, {}, "manual", nhtsa.raw, corrections);
 }
 
 // ─── Finalize: merge WMI, score confidence, report gaps ─────────────────────
@@ -92,6 +99,7 @@ const BASE_CONFIDENCE: Partial<Record<keyof DecodedVehicle, Confidence>> = {
 
 function finalize(
   vin: string, base: DecodedVehicle, baseSource: DecoderSource, raw: unknown,
+  corrections: Partial<Record<CorrectableField, string>>,
 ): DecodeResult {
   const wmi = decodeWmi(vin);
   const fields: DecodedVehicle = { ...base };
@@ -116,6 +124,10 @@ function finalize(
     delete confidence.engineCc;
   }
 
+  // Learned corrections override the decoder — they're crowd-verified and
+  // admin-approved, so they carry high confidence.
+  const learned = applyCorrections(fields, confidence, corrections, isEv);
+
   const couldNotDetermine = missingImportant(fields, isEv);
   const hasBase = Object.keys(base).length > 0;
   const source: DecoderSource = hasBase
@@ -125,8 +137,52 @@ function finalize(
 
   return {
     decoded, source, vin, fields, confidence, couldNotDetermine,
-    isEv, country: wmi.country, raw,
+    isEv, country: wmi.country,
+    overallConfidence: overallConfidence(fields, confidence, isEv),
+    learned, raw,
   };
+}
+
+// Apply approved community corrections onto the decoded fields. Returns true
+// if any were applied. engineCc is parsed to a number; EVs ignore it.
+function applyCorrections(
+  fields: DecodedVehicle,
+  confidence: Partial<Record<keyof DecodedVehicle, Confidence>>,
+  corrections: Partial<Record<CorrectableField, string>>,
+  isEv: boolean,
+): boolean {
+  let learned = false;
+  for (const [field, value] of Object.entries(corrections) as [CorrectableField, string][]) {
+    if (value == null) continue;
+    if (field === "engineCc") {
+      if (isEv) continue;
+      const n = Math.round(Number(value));
+      if (!Number.isFinite(n) || n < 50 || n > 20_000) continue;
+      fields.engineCc = n;
+    } else {
+      (fields as Record<string, unknown>)[field] = value;
+    }
+    confidence[field as keyof DecodedVehicle] = "high";
+    learned = true;
+  }
+  return learned;
+}
+
+// Quick 0–100 reliability read across the fields buyers care about. Missing
+// fields drag it down; learned/WMI high-confidence fields lift it.
+const CONFIDENCE_WEIGHT: Record<Confidence, number> = { high: 1, medium: 0.65, low: 0.35 };
+function overallConfidence(
+  fields: DecodedVehicle,
+  confidence: Partial<Record<keyof DecodedVehicle, Confidence>>,
+  isEv: boolean,
+): number {
+  const keys: (keyof DecodedVehicle)[] = ["year", "make", "model", "fuel", "bodyType", "transmission"];
+  if (!isEv) keys.push("engineCc");
+  let sum = 0;
+  for (const k of keys) {
+    if (fields[k] != null && confidence[k]) sum += CONFIDENCE_WEIGHT[confidence[k]!];
+  }
+  return Math.round((sum / keys.length) * 100);
 }
 
 // Important, form-facing fields the seller still needs to confirm.

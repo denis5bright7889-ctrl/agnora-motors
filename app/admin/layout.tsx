@@ -17,11 +17,13 @@ import {
   Newspaper,
   ScrollText,
   Activity,
+  ScanLine,
 } from "lucide-react";
 
 const navItems = [
   { href: "/admin",           label: "Overview",  icon: LayoutDashboard, exact: true },
   { href: "/admin/health",    label: "Health",    icon: Activity },
+  { href: "/admin/vin",       label: "VIN",       icon: ScanLine },
   { href: "/admin/dealers",   label: "Dealers",   icon: ShieldCheck },
   { href: "/admin/sellers",   label: "Sellers",   icon: UserCheck },
   { href: "/admin/cars",      label: "Listings",  icon: Car },

@@ -145,7 +145,7 @@ export default function PublicListingPage() {
   // VIN decoder state. `decode` is the result of the last attempt (null
   // before first attempt), `decoding` is the in-flight flag.
   const [decoding, setDecoding]       = useState(false);
-  const [decode, setDecode]           = useState<null | { decoded: boolean; source: string; fields: DecodedVehicle; applied: string[]; couldNotDetermine: string[]; isEv: boolean; country?: string }>(null);
+  const [decode, setDecode]           = useState<null | { decoded: boolean; source: string; fields: DecodedVehicle; applied: string[]; couldNotDetermine: string[]; isEv: boolean; country?: string; overallConfidence: number; learned: boolean }>(null);
   const [decodeError, setDecodeError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -299,6 +299,8 @@ export default function PublicListingPage() {
         couldNotDetermine: (json.couldNotDetermine ?? []) as string[],
         isEv:    !!json.isEv,
         country: json.country as string | undefined,
+        overallConfidence: Number(json.overallConfidence ?? 0),
+        learned: !!json.learned,
       };
       trackEvent("vin_decode_succeeded", {
         source:        result.source,
@@ -440,6 +442,33 @@ export default function PublicListingPage() {
           fuelType: clean.fuel,
           bodyType: clean.bodyType,
         });
+      }
+
+      // VIN learning loop: record fields the seller changed away from what the
+      // decoder filled. Aggregated by VIN prefix; improves future decodes once
+      // an admin approves a recurring pattern. Fire-and-forget.
+      if (decode && clean.vin) {
+        const f = decode.fields;
+        const changed: Record<string, unknown> = {};
+        const diff = (field: string, decoded: unknown, final: unknown) => {
+          if (decoded != null && final != null && final !== "" && String(final) !== String(decoded)) {
+            changed[field] = final;
+          }
+        };
+        diff("model", f.model, clean.model);
+        diff("trim", f.trim, clean.trim);
+        diff("bodyType", f.bodyType, clean.bodyType);
+        diff("fuel", f.fuel, clean.fuel);
+        diff("transmission", f.transmission, clean.transmission);
+        diff("drivetrain", f.drivetrain, clean.drivetrain);
+        diff("engineCc", f.engineCc, clean.specifications?.engineCc);
+        if (Object.keys(changed).length > 0) {
+          fetch("/api/vin/corrections", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ vin: clean.vin, fields: changed }),
+          }).catch(() => { /* never block publishing */ });
+        }
       }
 
       try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
@@ -639,11 +668,24 @@ export default function PublicListingPage() {
                             <CheckCircle2 className="h-4 w-4" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs font-semibold uppercase tracking-widest text-accent">
-                              {decode.applied.length > 0
-                                ? `${decode.applied.length} field${decode.applied.length === 1 ? "" : "s"} filled from your VIN`
-                                : "VIN read"}
-                            </p>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-semibold uppercase tracking-widest text-accent">
+                                {decode.applied.length > 0
+                                  ? `${decode.applied.length} field${decode.applied.length === 1 ? "" : "s"} filled from your VIN`
+                                  : "VIN read"}
+                              </p>
+                              <span className={cn(
+                                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold",
+                                decode.overallConfidence >= 80 ? "bg-green-500/15 text-green-600 dark:text-green-400"
+                                  : decode.overallConfidence >= 50 ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                  : "bg-red-500/15 text-red-600 dark:text-red-400",
+                              )}>
+                                {decode.overallConfidence}% confidence{decode.overallConfidence < 50 ? " · verify" : ""}
+                              </span>
+                            </div>
+                            {decode.learned && (
+                              <p className="text-[10px] text-accent/80 mt-0.5">Includes community-verified corrections for this VIN.</p>
+                            )}
                             <p className="text-sm font-display font-medium mt-0.5 tracking-tight">
                               {[decode.fields.year, decode.fields.make, decode.fields.model].filter(Boolean).join(" ") || "Unknown vehicle"}
                               {decode.fields.trim && <span className="text-muted font-normal ml-1.5">· {decode.fields.trim}</span>}

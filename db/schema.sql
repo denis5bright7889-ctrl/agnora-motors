@@ -732,6 +732,25 @@ CREATE TABLE IF NOT EXISTS vin_cache (
 );
 
 -- ============================================================
+-- VIN learning loop (V10001). Sellers' corrections to decoded fields are
+-- aggregated by VIN PREFIX (first 8 chars = WMI+VDS, shared across many cars)
+-- — never the full VIN. A pattern is applied to future decodes only after an
+-- admin approves it, so a few bad edits can't poison the decoder.
+CREATE TABLE IF NOT EXISTS vin_corrections (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vin_prefix  TEXT NOT NULL,
+  field       TEXT NOT NULL,        -- engineCc | transmission | fuel | bodyType | model | trim | drivetrain
+  value       TEXT NOT NULL,        -- corrected value (text; cast on apply)
+  times_seen  INTEGER NOT NULL DEFAULT 1,
+  status      TEXT NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vin_corrections_uniq ON vin_corrections(vin_prefix, field, value);
+CREATE INDEX IF NOT EXISTS idx_vin_corrections_prefix ON vin_corrections(vin_prefix, status);
+CREATE INDEX IF NOT EXISTS idx_vin_corrections_review ON vin_corrections(status, times_seen DESC);
+
+-- ============================================================
 -- Lead CRM (Agnora V10000 Phase 2)
 -- ============================================================
 -- Existing contact_requests rows ARE the leads. We add a pipeline status,
