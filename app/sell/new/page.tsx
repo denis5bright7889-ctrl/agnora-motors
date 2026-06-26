@@ -305,6 +305,13 @@ export default function PublicListingPage() {
       trackEvent("vin_decode_succeeded", {
         source:        result.source,
         matchedFields: Object.keys(result.fields),
+        // Quality signals for /admin/health monitoring.
+        decoded:       result.decoded,
+        partial:       !result.decoded && (!!result.fields.make || !!result.fields.year),
+        overallConfidence: result.overallConfidence,
+        isEv:          result.isEv,
+        learned:       result.learned,
+        make:          result.fields.make,
       });
 
       // Apply whatever we could source — even a partial decode (e.g. make +
@@ -463,6 +470,11 @@ export default function PublicListingPage() {
         diff("drivetrain", f.drivetrain, clean.drivetrain);
         diff("engineCc", f.engineCc, clean.specifications?.engineCc);
         if (Object.keys(changed).length > 0) {
+          trackEvent("vin_decode_corrected", {
+            fieldCount: Object.keys(changed).length,
+            fields: Object.keys(changed),
+            make: clean.make,
+          });
           fetch("/api/vin/corrections", {
             method: "POST",
             headers: { "Content-Type": "application/json" },

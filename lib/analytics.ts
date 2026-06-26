@@ -27,7 +27,10 @@ export type AnalyticsEvent =
   //     actually accepted from the decoder (post-filter for empty-only).
   | "vin_decode_attempted"
   | "vin_decode_succeeded"
-  | "vin_decode_applied";
+  | "vin_decode_applied"
+  // Fired when a seller changes a field the decoder filled — feeds the
+  // learning loop and the /admin/health correction-rate metric.
+  | "vin_decode_corrected";
 
 const SESSION_KEY = "agnora_session_id";
 
