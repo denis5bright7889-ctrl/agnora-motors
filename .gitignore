@@ -47,3 +47,8 @@ tsconfig.tsbuildinfo
 # Local dev stores (file-based fallback, dev-only)
 .local-users.json
 .local-posts.json
+
+# Vehicle-detection model weights (downloaded via `npm run detect:setup`).
+# Not committed: ~14 MB of binary that is reproducible from a URL, and git is
+# the wrong place for model weights.
+.models/
