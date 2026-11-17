@@ -157,3 +157,69 @@ function buildOtpEmail(name: string, code: string): string {
 </body>
 </html>`;
 }
+
+/**
+ * Admin → seller message about one specific listing. Sent server-side only:
+ * RESEND_API_KEY never reaches the browser. `replyTo` is the admin's own
+ * address so the seller's reply reaches a person, not the support alias.
+ */
+export async function sendSellerContactEmail(opts: {
+  to: string;
+  sellerName: string | null;
+  subject: string;
+  message: string;
+  replyTo?: string;
+}): Promise<void> {
+  if (!process.env.RESEND_API_KEY) {
+    console.error("[email] RESEND_API_KEY is not set — cannot contact seller");
+    throw new Error("Email service is not configured");
+  }
+
+  const { data, error } = await getResend().emails.send({
+    from: FROM,
+    to: opts.to,
+    subject: opts.subject,
+    replyTo: opts.replyTo,
+    html: buildSellerContactEmail(opts.sellerName, opts.message),
+  });
+
+  if (error) {
+    console.error("[email] Resend error to=%s error=%s", opts.to, JSON.stringify(error));
+    throw new Error(`Email delivery failed: ${(error as { message?: string }).message ?? "unknown"}`);
+  }
+  console.log("[email] Seller contact sent id=%s to=%s", data?.id, opts.to);
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function buildSellerContactEmail(name: string | null, message: string): string {
+  // The admin writes plain text; escape it and preserve their line breaks so a
+  // message can never inject markup into the email body.
+  const body = escapeHtml(message).replace(/\n/g, "<br />");
+  const greeting = name ? `Hi ${escapeHtml(name)},` : "Hello,";
+  return `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width,initial-scale=1.0" /></head>
+<body style="margin:0;padding:0;background-color:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f2f2f3;padding:32px 16px;">
+    <tr><td align="center">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background-color:#ffffff;border-radius:16px;padding:32px;">
+        <tr><td style="font-size:20px;font-weight:600;color:#111;padding-bottom:20px;">Agnora Motors</td></tr>
+        <tr><td style="font-size:15px;line-height:1.6;color:#333;">
+          <p style="margin:0 0 16px;">${greeting}</p>
+          <p style="margin:0 0 16px;">${body}</p>
+        </td></tr>
+        <tr><td style="padding-top:24px;border-top:1px solid #eee;font-size:12px;color:#888;">
+          This message was sent by the Agnora Motors team about one of your listings.
+          Reply to this email to reach us directly.
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
