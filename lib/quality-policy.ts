@@ -21,6 +21,22 @@ export const MIN_VIN_LEN        = 11;
 export const MAX_VIN_LEN        = 20;
 
 /**
+ * Canonical storage form of a VIN: uppercase, alphanumerics only.
+ *
+ * The listing forms only apply `text-transform: uppercase`, which changes how
+ * the field looks without changing what it submits — so a VIN typed on a
+ * phone keyboard arrived lowercase while the same VIN pasted on a desktop
+ * arrived uppercase, and the two never compared equal. Every write path
+ * normalises here so VIN equality is device-independent.
+ *
+ * Matches the normalisation already used by the decoder (lib/vin-decoder) and
+ * the corrections loop (lib/vin-corrections), so all three agree.
+ */
+export function normalizeVin(vin: string | null | undefined): string {
+  return (vin ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
  * In-JS predicate matching the SQL clause we apply in buildSearchWhere.
  * Used by the static-search path so dev parity holds when DATABASE_URL
  * isn't set.
