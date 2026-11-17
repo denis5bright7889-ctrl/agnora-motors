@@ -1,9 +1,9 @@
 import { Pool } from "@neondatabase/serverless";
-import type { Car, CarStatus, Dealer, DealerCar, User, NewsArticle, ResearchArticle, Make, Model } from "@/types";
+import type { Car, CarStatus, Dealer, DealerCar, User, NewsArticle, ResearchArticle, Make, Model, Specifications, CarPhoto, PhotoStatus } from "@/types";
 import type { SearchFilters, SearchResponse, SearchFacets, FacetBucket } from "@/lib/search";
 import { expandAliases } from "@/lib/search-aliases";
 import { getCentroid } from "@/lib/locations";
-import { QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, MAX_VIN_LEN } from "@/lib/quality-policy";
+import { QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, MAX_VIN_LEN, normalizeVin } from "@/lib/quality-policy";
 import { normalizeEmail } from "@/lib/email-normalize";
 
 // Use Pool (pg-compatible) so .query(text, params) works correctly.
@@ -437,12 +437,12 @@ export async function listDealers(status?: string): Promise<Dealer[]> {
             COALESCE((
               SELECT COUNT(*) FROM admin_logs al
               WHERE al.target_type = 'dealer'
-                AND al.target_id   = d.id
+                AND al.target_id   = d.id::text
                 AND al.action      = 'dealer_strike'
                 AND al.created_at  > NOW() - INTERVAL '30 days'
                 AND al.created_at  > COALESCE((
                   SELECT MAX(created_at) FROM admin_logs
-                  WHERE target_type = 'dealer' AND target_id = d.id
+                  WHERE target_type = 'dealer' AND target_id = d.id::text
                     AND action      = 'dealer_unsuspend'
                 ), '1970-01-01'::timestamptz)
             ), 0)::INT          AS "recentStrikeCount",
@@ -499,9 +499,10 @@ export async function createDealerCar(
   // Drafts can be saved with anything so dealers can stage incomplete records.
   // PR2: also refuse the publish if the dealer has been suspended.
   const status: CarStatus = (data.status ?? "active") as CarStatus;
+  const vin = normalizeVin(data.vin) || null;
   if (status === "active") {
     await assertActorActive("dealer", dealerId);
-    enforcePublishQuality(data.images, data.vin);
+    enforcePublishQuality(data.images, vin);
   }
 
   const centroid = getCentroid(data.location);
@@ -552,7 +553,7 @@ export async function createDealerCar(
       centroid?.lat ?? null,
       centroid?.lng ?? null,
       status,
-      data.vin                     ?? null,
+      vin,
       data.vinVerified             ?? false,
       data.serviceHistoryAvailable ?? false,
       data.ownershipVerified       ?? false,
@@ -564,6 +565,10 @@ export async function createDealerCar(
       data.accidentHistory ?? null,
     ],
   );
+
+  // Same per-photo seeding as the private-seller path — dealers get moderation
+  // records too, so admin photo controls work uniformly.
+  await seedCarPhotosFromUrls(rows[0].id, data.images ?? []);
   return rows[0];
 }
 
@@ -615,21 +620,27 @@ export async function assertActorActive(
   );
 }
 
-// Create a listing with NO dealer/seller account attached. Used by the
-// login-free public posting flow — buyers reach the seller via the
-// seller_name / seller_phone captured on the form.
+// Create a private-seller listing owned by a signed-in user (no dealer
+// account). seller_user_id is what the private dashboard, lead routing and
+// the strike system all key off, so it is required; seller_name /
+// seller_phone remain the contact details buyers see on the listing.
 export async function createPublicCar(
   data: Omit<
     DealerCar,
     "id" | "dealerId" | "slug" | "createdAt" | "updatedAt" | "views" | "inquiries" | "verified" | "status"
-  > & { sellerName: string; sellerPhone: string },
+  > & { sellerName: string; sellerPhone: string; sellerUserId: string },
 ): Promise<DealerCar> {
   const base   = slugify(`${data.year}-${data.make}-${data.model}`);
   const suffix = Math.random().toString(36).slice(2, 7);
   const slug   = `${base}-${suffix}`;
 
-  // PR7: same publish-quality bar for login-free listings.
-  enforcePublishQuality(data.images, data.vin);
+  // Suspended sellers cannot publish, same as the dealer path.
+  await assertActorActive("user", data.sellerUserId);
+
+  const vin = normalizeVin(data.vin) || null;
+
+  // PR7: same publish-quality bar for every private-seller listing.
+  enforcePublishQuality(data.images, vin);
 
   const centroid = getCentroid(data.location);
   // JSONB column expects a string; PG node driver does the parse on the way back.
@@ -643,8 +654,9 @@ export async function createPublicCar(
         latitude, longitude,
         vin, vin_verified, service_history_available, ownership_verified, inspection_available,
         specifications,
-        registration_number, mileage_verified, logbook_verified, accident_history)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34,$35,$36,$37)
+        registration_number, mileage_verified, logbook_verified, accident_history,
+        seller_user_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34,$35,$36,$37,$38)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -677,10 +689,10 @@ export async function createPublicCar(
       data.previousOwners ?? null,
       data.exteriorColor  ?? null,
       data.interiorColor  ?? null,
-      "login_free",
+      "private",
       centroid?.lat ?? null,
       centroid?.lng ?? null,
-      data.vin                     ?? null,
+      vin,
       data.vinVerified             ?? false,
       data.serviceHistoryAvailable ?? false,
       data.ownershipVerified       ?? false,
@@ -690,8 +702,13 @@ export async function createPublicCar(
       data.mileageVerified ?? false,
       data.logbookVerified ?? false,
       data.accidentHistory ?? null,
+      data.sellerUserId,
     ],
   );
+
+  // Per-photo records for moderation. The sync trigger rebuilds cars.images
+  // from these, so an unconfirmed photo drops out of public view on its own.
+  await seedCarPhotosFromUrls(rows[0].id, data.images ?? []);
   return rows[0];
 }
 
@@ -737,6 +754,219 @@ export async function getAllDbCars(): Promise<DealerCar[]> {
      GROUP BY c.id
      ORDER BY c.created_at DESC`,
   );
+}
+
+// ── Admin listings ──────────────────────────────────────────────────────────
+// One row per listing WITH its owner resolved. getAllDbCars() selects no
+// seller identity at all, which is why the admin table could never answer
+// "who posted this car?" — the data never reached the page.
+//
+// Ownership lives in two places depending on how the car was listed:
+//   dealer listing  → cars.dealer_id      → dealers → users
+//   private listing → cars.seller_user_id → users
+// Pre-2026-09-16 private listings predate seller_user_id being populated, so
+// they resolve to the seller_name / seller_phone captured on the form and
+// carry no email. That gap is real; it is surfaced, not invented.
+
+export interface AdminCarRow {
+  id: string;
+  slug: string;
+  year: number;
+  make: string;
+  model: string;
+  trim: string | null;
+  price: number;
+  location: string;
+  vin: string | null;
+  status: CarStatus;
+  photoCount: number;
+  primaryImage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sellerType: string | null;
+  sellerUserId: string | null;
+  dealerId: string | null;
+  sellerName: string | null;
+  sellerEmail: string | null;
+  sellerPhone: string | null;
+  verificationStatus: string | null;
+}
+
+export interface AdminCarQuery {
+  q?: string;
+  status?: string;
+  sellerType?: string;
+  verification?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+const ADMIN_CARS_JOIN = `
+     FROM cars c
+     LEFT JOIN dealers d  ON d.id  = c.dealer_id
+     LEFT JOIN users   du ON du.id = d.user_id
+     LEFT JOIN users   su ON su.id = c.seller_user_id
+     LEFT JOIN seller_verifications sv
+            ON sv.user_id = COALESCE(c.seller_user_id, d.user_id)`;
+
+/** Shared WHERE builder so the row query and any future count agree exactly. */
+function buildAdminCarsWhere(opts: AdminCarQuery): { sql: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (opts.status) {
+    params.push(opts.status);
+    conditions.push(`c.status = $${params.length}`);
+  }
+  if (opts.sellerType) {
+    params.push(opts.sellerType);
+    conditions.push(`c.seller_type = $${params.length}`);
+  }
+  if (opts.verification) {
+    if (opts.verification === "none") {
+      conditions.push(`sv.status IS NULL`);
+    } else {
+      params.push(opts.verification);
+      conditions.push(`sv.status = $${params.length}`);
+    }
+  }
+  if (opts.q?.trim()) {
+    params.push(`%${opts.q.trim()}%`);
+    const p = `$${params.length}`;
+    // Listing id, seller name/email/phone, make, model and VIN — the fields an
+    // admin actually has in hand when chasing a specific car or person.
+    conditions.push(`(
+      c.id::text ILIKE ${p} OR
+      c.make ILIKE ${p} OR
+      c.model ILIKE ${p} OR
+      COALESCE(c.vin, '') ILIKE ${p} OR
+      COALESCE(d.business_name, su.name, c.seller_name, '') ILIKE ${p} OR
+      COALESCE(du.email, su.email, '') ILIKE ${p} OR
+      COALESCE(d.phone, su.phone, c.seller_phone, '') ILIKE ${p}
+    )`);
+  }
+
+  return {
+    sql: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "",
+    params,
+  };
+}
+
+export async function listAdminCars(
+  opts: AdminCarQuery = {},
+): Promise<{ rows: AdminCarRow[]; total: number }> {
+  const pageSize = Math.min(Math.max(opts.pageSize ?? 25, 1), 100);
+  const page     = Math.max(opts.page ?? 1, 1);
+  const offset   = (page - 1) * pageSize;
+
+  const where = buildAdminCarsWhere(opts);
+  const params = [...where.params, pageSize, offset];
+
+  // COUNT(*) OVER() returns the unfiltered-by-LIMIT total in the same scan, so
+  // pagination costs one query rather than two.
+  const rows = await query<AdminCarRow & { total: string }>(
+    `SELECT c.id, c.slug, c.year, c.make, c.model, c.trim, c.price, c.location,
+            c.vin, c.status,
+            COALESCE(array_length(c.images, 1), 0)::INT AS "photoCount",
+            c.images[1]                                 AS "primaryImage",
+            c.created_at AS "createdAt",
+            c.updated_at AS "updatedAt",
+            c.seller_type    AS "sellerType",
+            c.seller_user_id AS "sellerUserId",
+            c.dealer_id      AS "dealerId",
+            COALESCE(d.business_name, su.name, c.seller_name)   AS "sellerName",
+            COALESCE(du.email, su.email)                        AS "sellerEmail",
+            COALESCE(d.phone, su.phone, c.seller_phone)         AS "sellerPhone",
+            sv.status                                           AS "verificationStatus",
+            COUNT(*) OVER()                                     AS total
+     ${ADMIN_CARS_JOIN}
+     ${where.sql}
+     ORDER BY c.created_at DESC
+     LIMIT $${where.params.length + 1} OFFSET $${where.params.length + 2}`,
+    params,
+  );
+
+  return {
+    rows: rows.map(({ total: _t, ...r }) => r),
+    total: rows.length > 0 ? Number(rows[0].total) : 0,
+  };
+}
+
+/** Single listing with its owner resolved, for the admin detail page. */
+export async function getAdminCarDetail(id: string): Promise<
+  | (AdminCarRow & {
+      description: string;
+      mileage: number;
+      fuel: string;
+      transmission: string;
+      bodyType: string;
+      condition: string;
+      images: string[];
+      features: string[];
+      specifications: Specifications | null;
+      moderatedBy: string | null;
+      moderatedAt: string | null;
+      moderationReason: string | null;
+      sellerJoinedAt: string | null;
+      sellerRole: string | null;
+    })
+  | null
+> {
+  const rows = await query<AdminCarRow & {
+    description: string; mileage: number; fuel: string; transmission: string;
+    bodyType: string; condition: string; images: string[]; features: string[];
+    specifications: Specifications | null;
+    moderatedBy: string | null; moderatedAt: string | null; moderationReason: string | null;
+    sellerJoinedAt: string | null; sellerRole: string | null;
+  }>(
+    `SELECT c.id, c.slug, c.year, c.make, c.model, c.trim, c.price, c.location,
+            c.vin, c.status, c.description, c.mileage, c.fuel, c.transmission,
+            c.body_type AS "bodyType", c.condition, c.images, c.features,
+            c.specifications,
+            COALESCE(array_length(c.images, 1), 0)::INT AS "photoCount",
+            c.images[1]                                 AS "primaryImage",
+            c.created_at AS "createdAt",
+            c.updated_at AS "updatedAt",
+            c.moderated_by      AS "moderatedBy",
+            c.moderated_at      AS "moderatedAt",
+            c.moderation_reason AS "moderationReason",
+            c.seller_type    AS "sellerType",
+            c.seller_user_id AS "sellerUserId",
+            c.dealer_id      AS "dealerId",
+            COALESCE(d.business_name, su.name, c.seller_name) AS "sellerName",
+            COALESCE(du.email, su.email)                      AS "sellerEmail",
+            COALESCE(d.phone, su.phone, c.seller_phone)       AS "sellerPhone",
+            sv.status                                         AS "verificationStatus",
+            COALESCE(su.created_at, du.created_at)            AS "sellerJoinedAt",
+            COALESCE(su.role, du.role)                        AS "sellerRole"
+     ${ADMIN_CARS_JOIN}
+     WHERE c.id = $1
+     LIMIT 1`,
+    [id],
+  );
+  return rows[0] ?? null;
+}
+
+/** Moderation/audit trail for one listing, newest first. */
+export async function getCarModerationHistory(carId: string): Promise<{
+  id: string; action: string; adminEmail: string;
+  details: Record<string, unknown>; createdAt: string;
+}[]> {
+  return query(
+    `SELECT id, action, admin_email AS "adminEmail", details, created_at AS "createdAt"
+       FROM admin_logs
+      WHERE target_type = 'car' AND target_id = $1
+      ORDER BY created_at DESC
+      LIMIT 100`,
+    [carId],
+  );
+}
+
+export async function getAdminCarStatusCounts(): Promise<Record<string, number>> {
+  const rows = await query<{ status: string; count: string }>(
+    `SELECT status, COUNT(*)::TEXT AS count FROM cars GROUP BY status`,
+  );
+  return Object.fromEntries(rows.map((r) => [r.status, Number(r.count)]));
 }
 
 export async function getPublicCars(opts: {
@@ -895,6 +1125,12 @@ export async function updateDealerCar(
   dealerId: string,
   data: Partial<DealerCar>,
 ): Promise<void> {
+  // Canonicalise an incoming VIN before it is either checked or written, so an
+  // edit can't put a lowercase VIN back into a row.
+  if (data.vin !== undefined) {
+    data = { ...data, vin: normalizeVin(data.vin) || undefined };
+  }
+
   // PR9: close the update-quality loophole. Before generating the UPDATE, look
   // at the post-merge images + vin. If the resulting status is "active", the
   // car must still pass enforcePublishQuality(). Drafts are intentionally
@@ -1107,9 +1343,16 @@ export async function adminDeleteCar(carId: string): Promise<void> {
 
 // Finds active listings sharing a VIN with another non-archived listing.
 // The *newer* car in each pair is returned as the duplicate (oldest wins —
-// usually the legitimate first listing). VIN comparison is case-insensitive
-// and trimmed; null/short VINs are skipped (those failures get caught by
-// getNonCompliantListings instead).
+// usually the legitimate first listing). null/short VINs are skipped (those
+// failures get caught by getNonCompliantListings instead).
+//
+// Grouping uses the SAME normalisation as normalizeVin() in
+// lib/quality-policy.ts — uppercase, strip every non-alphanumeric — not just
+// UPPER(TRIM()). This matters for rows written before write-path normalisation
+// existed: "JTD-123 456" and "JTD123456" are the same vehicle, but
+// UPPER(TRIM()) puts them in different partitions, so a duplicate submitted
+// with different punctuation was never reported. Comparing on the normalised
+// form closes that gap.
 export interface DuplicateVin {
   id: string;
   slug: string;
@@ -1126,17 +1369,21 @@ export interface DuplicateVin {
 export async function findDuplicateVins(limit = 200): Promise<DuplicateVin[]> {
   const rows = await query<DuplicateVin>(
     `WITH ranked AS (
-       SELECT id, slug, UPPER(TRIM(vin)) AS vin, year, make, model,
+       SELECT id, slug, norm_vin AS vin, year, make, model,
               dealer_id AS "dealerId", created_at AS "createdAt",
               ROW_NUMBER() OVER (
-                PARTITION BY UPPER(TRIM(vin)) ORDER BY created_at ASC
+                PARTITION BY norm_vin ORDER BY created_at ASC
               ) AS rn,
-              FIRST_VALUE(id)         OVER (PARTITION BY UPPER(TRIM(vin)) ORDER BY created_at ASC) AS "originalId",
-              FIRST_VALUE(created_at) OVER (PARTITION BY UPPER(TRIM(vin)) ORDER BY created_at ASC) AS "originalCreatedAt"
-       FROM cars
+              FIRST_VALUE(id)         OVER (PARTITION BY norm_vin ORDER BY created_at ASC) AS "originalId",
+              FIRST_VALUE(created_at) OVER (PARTITION BY norm_vin ORDER BY created_at ASC) AS "originalCreatedAt"
+       FROM (
+         SELECT id, slug, year, make, model, dealer_id, created_at, status,
+                REGEXP_REPLACE(UPPER(vin), '[^A-Z0-9]', '', 'g') AS norm_vin
+           FROM cars
+       ) c
        WHERE status = 'active'
-         AND vin IS NOT NULL
-         AND LENGTH(TRIM(vin)) >= $1
+         AND norm_vin <> ''
+         AND LENGTH(norm_vin) >= $1
      )
      SELECT id, slug, vin, year, make, model, "dealerId", "createdAt",
             "originalId", "originalCreatedAt"
@@ -2042,6 +2289,14 @@ export async function reviewSellerVerification(
     if (rows[0]) {
       await query(
         `UPDATE private_sellers SET verified = TRUE WHERE user_id = $1`,
+        [rows[0].userId],
+      );
+      // Approval promotes the seller type. Unlike the listing path this
+      // overwrites, because an approved application is the stronger signal —
+      // except for dealers, whose type is on a different track.
+      await query(
+        `UPDATE users SET seller_type = 'verified_seller'
+          WHERE id = $1 AND COALESCE(seller_type, '') <> 'dealer'`,
         [rows[0].userId],
       );
     }
@@ -3167,5 +3422,542 @@ export async function searchCarsDb(filters: SearchFilters): Promise<SearchRespon
     totalPages: Math.max(1, Math.ceil(total / limit)),
     facets,
     source: "db",
+  };
+}
+
+// ── Car photos ──────────────────────────────────────────────────────────────
+// car_photos holds per-photo moderation state; cars.images stays the
+// denormalised read path and is rebuilt by the sync_car_images() trigger
+// whenever a row here changes. Never write cars.images directly from these
+// helpers — let the trigger do it, or the two will drift.
+
+// Every column is qualified with the `p` alias, so EVERY query using this
+// list must alias car_photos as `p`.
+//
+// Unqualified names worked only by accident: car_photos on its own has no
+// name clash, but listPendingCarPhotos joins it to `cars`, where a bare `id`
+// (and `status`, `created_at`, `updated_at`) matches both tables. Postgres
+// then refuses the whole query with "column reference \"id\" is ambiguous",
+// so the admin pending-photo queue failed the moment the table existed.
+const CAR_PHOTO_COLS = `
+  p.id, p.car_id AS "carId", p.url, p.original_url AS "originalUrl",
+  p.position, p.is_primary AS "isPrimary", p.status,
+  p.moderated_by AS "moderatedBy", p.moderated_at AS "moderatedAt",
+  p.moderation_reason AS "moderationReason",
+  p.classification, p.classification_score AS "classificationScore",
+  p.classified_by AS "classifiedBy", p.sha256,
+  p.quality_score AS "qualityScore", p.quality_verdict AS "qualityVerdict",
+  p.quality_detail AS "qualityDetail", p.width, p.height,
+  p.public_id AS "publicId",
+  p.created_at AS "createdAt", p.updated_at AS "updatedAt"`;
+
+export async function listCarPhotos(carId: string): Promise<CarPhoto[]> {
+  try {
+    return await query<CarPhoto>(
+      `SELECT ${CAR_PHOTO_COLS} FROM car_photos p
+        WHERE p.car_id = $1
+        ORDER BY p.is_primary DESC, p.position ASC, p.created_at ASC`,
+      [carId],
+    );
+  } catch (err) {
+    // Tolerate code deployed ahead of the car_photos migration: callers fall
+    // back to the legacy cars.images array instead of the page erroring.
+    if (err instanceof Error && /relation .*car_photos.* does not exist/i.test(err.message)) {
+      console.warn("[db] car_photos missing — run db/migrations/2026-09-16-car-photos.sql");
+      return [];
+    }
+    throw err;
+  }
+}
+
+/**
+ * Resolves who owns the listing a photo belongs to, so mutation endpoints can
+ * authorise without trusting a car id from the client. Returns null when the
+ * photo does not exist.
+ */
+export async function getCarPhotoOwner(photoId: string): Promise<
+  { carId: string; dealerUserId: string | null; sellerUserId: string | null } | null
+> {
+  const rows = await query<{ carId: string; dealerUserId: string | null; sellerUserId: string | null }>(
+    `SELECT p.car_id AS "carId", d.user_id AS "dealerUserId", c.seller_user_id AS "sellerUserId"
+       FROM car_photos p
+       JOIN cars c ON c.id = p.car_id
+       LEFT JOIN dealers d ON d.id = c.dealer_id
+      WHERE p.id = $1
+      LIMIT 1`,
+    [photoId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function getCarOwner(carId: string): Promise<
+  { dealerUserId: string | null; sellerUserId: string | null } | null
+> {
+  const rows = await query<{ dealerUserId: string | null; sellerUserId: string | null }>(
+    `SELECT d.user_id AS "dealerUserId", c.seller_user_id AS "sellerUserId"
+       FROM cars c
+       LEFT JOIN dealers d ON d.id = c.dealer_id
+      WHERE c.id = $1
+      LIMIT 1`,
+    [carId],
+  );
+  return rows[0] ?? null;
+}
+
+/** Seeds car_photos for a freshly created listing. Order defines position. */
+export async function insertCarPhotos(
+  carId: string,
+  photos: {
+    url: string;
+    sha256?: string | null;
+    classification?: string;
+    classificationScore?: number | null;
+    classifiedBy?: string | null;
+    status?: string;
+    qualityScore?: number | null;
+    qualityVerdict?: string | null;
+    qualityDetail?: unknown;
+    width?: number | null;
+    height?: number | null;
+    publicId?: string | null;
+  }[],
+): Promise<void> {
+  if (photos.length === 0) return;
+  const values: string[] = [];
+  const params: unknown[] = [carId];
+  photos.forEach((p, i) => {
+    const b = params.length;
+    params.push(
+      p.url, i, i === 0, p.status ?? "approved",
+      p.classification ?? "unchecked", p.classificationScore ?? null,
+      p.classifiedBy ?? null, p.sha256 ?? null,
+      p.qualityScore ?? null, p.qualityVerdict ?? null,
+      p.qualityDetail == null ? null : JSON.stringify(p.qualityDetail),
+      p.width ?? null, p.height ?? null, p.publicId ?? null,
+    );
+    // url is written to both url and original_url, hence $(b+1) twice. The
+    // placeholder order must track the push order above exactly:
+    // url, position, is_primary, status, classification, score, classifier,
+    // sha256, qualityScore, qualityVerdict, qualityDetail, w, h, publicId.
+    values.push(
+      `($1, $${b + 1}, $${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, $${b + 5}, ` +
+      `$${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}, $${b + 10}, $${b + 11}::jsonb, ` +
+      `$${b + 12}, $${b + 13}, $${b + 14})`,
+    );
+  });
+  await query(
+    `INSERT INTO car_photos
+       (car_id, url, original_url, position, is_primary, status,
+        classification, classification_score, classified_by, sha256,
+        quality_score, quality_verdict, quality_detail, width, height, public_id)
+     VALUES ${values.join(", ")}
+     ON CONFLICT DO NOTHING`,
+    params,
+  );
+}
+
+export async function moderateCarPhoto(
+  photoId: string, adminId: string, status: PhotoStatus, reason: string | null,
+): Promise<void> {
+  await query(
+    `UPDATE car_photos
+        SET status = $2, moderated_by = $3, moderated_at = NOW(),
+            moderation_reason = $4, updated_at = NOW()
+      WHERE id = $1`,
+    [photoId, status, adminId, reason],
+  );
+}
+
+/**
+ * Deletes a photo row and hands back what is needed to delete the stored
+ * asset behind it.
+ *
+ * RETURNING is what makes the storage cleanup safe: the id comes from the row
+ * that was actually deleted, in the same statement, so two concurrent deletes
+ * cannot both believe they own the asset. Callers should prefer
+ * deletePhotoAndAsset() in lib/photo-storage.ts, which pairs this with the
+ * storage call.
+ */
+export async function deleteCarPhoto(
+  photoId: string,
+): Promise<{ publicId: string | null; url: string } | null> {
+  const rows = await query<{ publicId: string | null; url: string }>(
+    `DELETE FROM car_photos WHERE id = $1
+      RETURNING public_id AS "publicId", url`,
+    [photoId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Every asset id still referenced by a photo row. Used before deleting a
+ * stored file to confirm nothing else points at it — an edited derivative and
+ * its original can share one asset, and a dealer may reuse an image across
+ * listings, so "my row is gone" does not by itself mean "nobody needs it".
+ */
+export async function isPublicIdInUse(publicId: string, excludePhotoId?: string): Promise<boolean> {
+  const rows = await query<{ n: string }>(
+    `SELECT COUNT(*)::text AS n FROM car_photos
+      WHERE public_id = $1 AND ($2::uuid IS NULL OR id <> $2::uuid)`,
+    [publicId, excludePhotoId ?? null],
+  );
+  return Number(rows[0]?.n ?? 0) > 0;
+}
+
+/** Swaps the primary flag atomically — the partial unique index forbids two. */
+export async function setPrimaryCarPhoto(carId: string, photoId: string): Promise<void> {
+  await query(`UPDATE car_photos SET is_primary = FALSE, updated_at = NOW()
+                WHERE car_id = $1 AND is_primary`, [carId]);
+  await query(`UPDATE car_photos SET is_primary = TRUE, updated_at = NOW()
+                WHERE id = $1 AND car_id = $2`, [photoId, carId]);
+}
+
+/** Applies an explicit display order. Ids not belonging to carId are ignored. */
+export async function reorderCarPhotos(carId: string, orderedIds: string[]): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await query(
+    `UPDATE car_photos AS p
+        SET position = v.pos, updated_at = NOW()
+       FROM (SELECT * FROM unnest($2::uuid[]) WITH ORDINALITY AS t(id, pos)) AS v
+      WHERE p.id = v.id AND p.car_id = $1`,
+    [carId, orderedIds],
+  );
+}
+
+/**
+ * Points a photo at a new image. Used by both "replace" (fresh upload) and
+ * "edit" (a Cloudinary-transformed derivative). originalUrl is only set on a
+ * true replacement so an edit never destroys the moderation reference.
+ */
+export async function updateCarPhotoUrl(
+  photoId: string,
+  url: string,
+  opts: {
+    isReplacement: boolean;
+    sha256?: string | null;
+    publicId?: string | null;
+    qualityScore?: number | null;
+    qualityVerdict?: string | null;
+    qualityDetail?: unknown;
+    width?: number | null;
+    height?: number | null;
+  } = { isReplacement: false },
+): Promise<void> {
+  await query(
+    `UPDATE car_photos
+        SET url = $2,
+            original_url = CASE WHEN $3 THEN $2 ELSE original_url END,
+            sha256 = COALESCE($4, sha256),
+            -- public_id only changes on a true replacement; an edit is a
+            -- transformation of the same stored asset.
+            public_id = CASE WHEN $3 THEN COALESCE($5, public_id) ELSE public_id END,
+            quality_score   = CASE WHEN $3 THEN $6          ELSE quality_score   END,
+            quality_verdict = CASE WHEN $3 THEN $7          ELSE quality_verdict END,
+            quality_detail  = CASE WHEN $3 THEN $8::jsonb   ELSE quality_detail  END,
+            width           = CASE WHEN $3 THEN $9          ELSE width           END,
+            height          = CASE WHEN $3 THEN $10         ELSE height          END,
+            -- A replaced or re-edited image has not been reviewed in its new form.
+            status = CASE WHEN status = 'rejected' THEN 'pending' ELSE status END,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [
+      photoId, url, opts.isReplacement, opts.sha256 ?? null, opts.publicId ?? null,
+      opts.qualityScore ?? null, opts.qualityVerdict ?? null,
+      opts.qualityDetail == null ? null : JSON.stringify(opts.qualityDetail),
+      opts.width ?? null, opts.height ?? null,
+    ],
+  );
+}
+
+/** Photos awaiting review across all listings, for the admin queue. */
+export async function listPendingCarPhotos(limit = 100): Promise<
+  (CarPhoto & { year: number; make: string; model: string; carStatus: string })[]
+> {
+  return query(
+    `SELECT ${CAR_PHOTO_COLS}, c.year, c.make, c.model, c.status AS "carStatus"
+       FROM car_photos p
+       JOIN cars c ON c.id = p.car_id
+      WHERE p.status = 'pending'
+      ORDER BY p.created_at ASC
+      LIMIT $1`,
+    [limit],
+  );
+}
+
+/**
+ * Records what the server decided about an uploaded image — both the vehicle
+ * classification and the quality assessment — keyed by the delivered URL.
+ *
+ * This is the authoritative record. Listing creation reads it back instead of
+ * trusting anything the browser echoes, so a client cannot claim a better
+ * score than the one the server measured.
+ */
+export async function recordUploadClassification(data: {
+  url: string;
+  publicId?: string | null;
+  sha256: string;
+  label: string;
+  score: number | null;
+  provider: string;
+  userId: string;
+  quality?: {
+    score: number | null;
+    verdict: string;
+    width: number | null;
+    height: number | null;
+    metrics: unknown;
+    reasons: string[];
+    recommendation: string | null;
+  } | null;
+}): Promise<void> {
+  const q = data.quality ?? null;
+  // Only the explainable parts are persisted: a moderator needs the metric
+  // ratings and the reasons, not the whole internal object.
+  const detail = q
+    ? JSON.stringify({
+      metrics: q.metrics,
+      reasons: q.reasons,
+      recommendation: q.recommendation,
+    })
+    : null;
+
+  await query(
+    `INSERT INTO upload_classifications
+       (url, public_id, sha256, label, score, provider, user_id,
+        quality_score, quality_verdict, quality_detail, width, height)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12)
+     ON CONFLICT (url) DO UPDATE
+       SET sha256          = EXCLUDED.sha256,
+           public_id       = EXCLUDED.public_id,
+           label           = EXCLUDED.label,
+           score           = EXCLUDED.score,
+           provider        = EXCLUDED.provider,
+           quality_score   = EXCLUDED.quality_score,
+           quality_verdict = EXCLUDED.quality_verdict,
+           quality_detail  = EXCLUDED.quality_detail,
+           width           = EXCLUDED.width,
+           height          = EXCLUDED.height`,
+    [
+      data.url, data.publicId ?? null, data.sha256, data.label, data.score,
+      data.provider, data.userId,
+      q?.score ?? null, q?.verdict ?? null, detail,
+      q?.width ?? null, q?.height ?? null,
+    ],
+  );
+}
+
+/**
+ * Looks up server-recorded classifications for a set of uploaded URLs, so
+ * listing creation can decide each photo's initial moderation state without
+ * trusting anything the browser sent.
+ */
+export interface UploadRecord {
+  label: string;
+  score: number | null;
+  provider: string;
+  sha256: string | null;
+  publicId: string | null;
+  qualityScore: number | null;
+  qualityVerdict: string | null;
+  qualityDetail: unknown;
+  width: number | null;
+  height: number | null;
+}
+
+export async function getUploadClassifications(
+  urls: string[],
+): Promise<Map<string, UploadRecord>> {
+  if (urls.length === 0) return new Map();
+  const rows = await query<UploadRecord & { url: string }>(
+    `SELECT url, label, score, provider, sha256,
+            public_id       AS "publicId",
+            quality_score   AS "qualityScore",
+            quality_verdict AS "qualityVerdict",
+            quality_detail  AS "qualityDetail",
+            width, height
+       FROM upload_classifications WHERE url = ANY($1::text[])`,
+    [urls],
+  );
+  return new Map(rows.map((r) => [r.url, r]));
+}
+
+/**
+ * Creates car_photos rows for a new listing from the uploaded URLs, applying
+ * the classification the server recorded at upload time.
+ *
+ * A photo the classifier could not confirm starts as 'pending', which keeps it
+ * out of cars.images (and therefore out of public view) until a moderator
+ * looks at it. With no classifier configured everything is 'unchecked' and
+ * goes straight to 'approved', preserving today's behaviour exactly.
+ */
+export async function seedCarPhotosFromUrls(carId: string, urls: string[]): Promise<void> {
+  if (urls.length === 0) return;
+  const meta = await getUploadClassifications(urls);
+  const seen = new Set<string>();
+  const photos = urls
+    // Same image twice in one listing is never intentional.
+    .filter((u) => { const s = meta.get(u)?.sha256 ?? u; if (seen.has(s)) return false; seen.add(s); return true; })
+    .map((url) => {
+      const m = meta.get(url);
+      const label = m?.label ?? "unchecked";
+      const verdict = m?.qualityVerdict ?? null;
+
+      // Two independent gates, and a photo must clear BOTH to go live.
+      //
+      // A vehicle was confirmed, or no classifier was configured at all
+      // ('unchecked'), which preserves the pre-classifier behaviour rather
+      // than holding every listing because an env var is unset.
+      const vehicleOk = label === "vehicle" || label === "unchecked";
+      // 'reject' never reaches here — the upload route refuses it outright —
+      // so the only quality state that holds a photo back is 'review'.
+      // A null or 'unknown' verdict means the analyser did not run; it is not
+      // treated as a failure, otherwise an unavailable sharp install would
+      // silently freeze every new listing on the site.
+      const qualityOk = verdict === null || ["good", "acceptable", "unknown"].includes(verdict);
+
+      return {
+        url,
+        sha256: m?.sha256 ?? null,
+        publicId: m?.publicId ?? null,
+        classification: label,
+        classificationScore: m?.score ?? null,
+        classifiedBy: m?.provider ?? null,
+        qualityScore: m?.qualityScore ?? null,
+        qualityVerdict: verdict,
+        qualityDetail: m?.qualityDetail ?? null,
+        width: m?.width ?? null,
+        height: m?.height ?? null,
+        status: vehicleOk && qualityOk ? "approved" : "pending",
+      };
+    });
+  await insertCarPhotos(carId, photos);
+}
+
+export async function getPhotoById(photoId: string): Promise<CarPhoto | null> {
+  const rows = await query<CarPhoto>(
+    `SELECT ${CAR_PHOTO_COLS} FROM car_photos p WHERE p.id = $1 LIMIT 1`, [photoId],
+  );
+  return rows[0] ?? null;
+}
+
+// ── Seller type ─────────────────────────────────────────────────────────────
+
+/**
+ * Sets users.seller_type only when it is not already set, so a dealer or an
+ * approved verified seller is never demoted by a later listing.
+ */
+export async function setSellerTypeIfUnset(userId: string, sellerType: string): Promise<void> {
+  await query(
+    `UPDATE users SET seller_type = $2 WHERE id = $1 AND seller_type IS NULL`,
+    [userId, sellerType],
+  );
+}
+
+export async function setSellerType(userId: string, sellerType: string): Promise<void> {
+  await query(`UPDATE users SET seller_type = $2 WHERE id = $1`, [userId, sellerType]);
+}
+
+export interface AdminSellerRow {
+  userId: string;
+  name: string | null;
+  email: string;
+  phone: string | null;
+  sellerType: string | null;
+  verificationStatus: string | null;
+  registeredAt: string;
+  totalListings: number;
+  activeListings: number;
+  rejectedListings: number;
+  soldListings: number;
+}
+
+/**
+ * Sellers with their listing counts, aggregated in SQL. Deliberately one query
+ * with a lateral aggregate rather than a per-seller count — an admin table that
+ * issues a query per row is how these pages get slow.
+ */
+/**
+ * Turns an opaque "column does not exist" into an error that names the cause.
+ *
+ * Deliberately rethrows rather than returning an empty result. A query that
+ * quietly returns nothing when its schema is missing renders as "0 sellers",
+ * which is indistinguishable from "this account genuinely has no sellers" —
+ * and that ambiguity is expensive: an admin page reporting 0 listings sent us
+ * on a long hunt before the real cause (an unapplied migration) was found.
+ * Failing loudly with the migration filename is strictly more useful.
+ */
+function rethrowIfSchemaMissing(err: unknown, migration: string): never {
+  if (err instanceof Error && /column .* does not exist|relation .* does not exist/i.test(err.message)) {
+    throw new Error(
+      `${err.message} — this schema has not been applied. ` +
+      `Run: npm run db:migrate (adds ${migration}).`,
+      { cause: err },
+    );
+  }
+  throw err;
+}
+
+export async function listAdminSellers(opts: {
+  q?: string; sellerType?: string; verification?: string;
+  page?: number; pageSize?: number;
+} = {}): Promise<{ rows: AdminSellerRow[]; total: number }> {
+  const pageSize = Math.min(Math.max(opts.pageSize ?? 25, 1), 100);
+  const page     = Math.max(opts.page ?? 1, 1);
+
+  const conditions: string[] = [
+    // Only people who actually sell — buyers with no listing are not sellers.
+    `(u.seller_type IS NOT NULL OR s.total > 0)`,
+  ];
+  const params: unknown[] = [];
+
+  if (opts.sellerType) {
+    params.push(opts.sellerType);
+    conditions.push(`u.seller_type = $${params.length}`);
+  }
+  if (opts.verification) {
+    if (opts.verification === "unverified") {
+      conditions.push(`sv.status IS NULL`);
+    } else {
+      params.push(opts.verification);
+      conditions.push(`sv.status = $${params.length}`);
+    }
+  }
+  if (opts.q?.trim()) {
+    params.push(`%${opts.q.trim()}%`);
+    const p = `$${params.length}`;
+    conditions.push(`(COALESCE(u.name,'') ILIKE ${p} OR u.email ILIKE ${p} OR COALESCE(u.phone,'') ILIKE ${p})`);
+  }
+
+  params.push(pageSize, (page - 1) * pageSize);
+
+  // users.seller_type arrives with db/migrations/2026-09-16-seller-types.sql.
+  const rows = await query<AdminSellerRow & { total_count: string }>(
+    `SELECT u.id AS "userId", u.name, u.email, u.phone,
+            u.seller_type AS "sellerType",
+            sv.status     AS "verificationStatus",
+            u.created_at  AS "registeredAt",
+            s.total::INT    AS "totalListings",
+            s.active::INT   AS "activeListings",
+            s.rejected::INT AS "rejectedListings",
+            s.sold::INT     AS "soldListings",
+            COUNT(*) OVER() AS total_count
+       FROM users u
+       LEFT JOIN seller_verifications sv ON sv.user_id = u.id
+       CROSS JOIN LATERAL (
+         SELECT COUNT(*)                                          AS total,
+                COUNT(*) FILTER (WHERE c.status = 'active')       AS active,
+                COUNT(*) FILTER (WHERE c.status = 'rejected')     AS rejected,
+                COUNT(*) FILTER (WHERE c.status = 'sold')         AS sold
+           FROM cars c WHERE c.seller_user_id = u.id
+       ) s
+      WHERE ${conditions.join(" AND ")}
+      ORDER BY s.total DESC, u.created_at DESC
+      LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params,
+  ).catch((e) => rethrowIfSchemaMissing(e, "users.seller_type"));
+
+  return {
+    rows: rows.map(({ total_count: _c, ...r }) => r),
+    total: rows.length > 0 ? Number(rows[0].total_count) : 0,
   };
 }

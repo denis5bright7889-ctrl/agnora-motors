@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -135,6 +136,7 @@ const CONDITION_LABEL: Record<FormData["condition"], string> = {
 
 export default function PublicListingPage() {
   const router = useRouter();
+  const { data: session } = useSession();
   const [step, setStep]               = useState<0 | 1 | 2>(0);
   const [images, setImages]           = useState<ListingImage[]>([]);
   const [features, setFeatures]       = useState<string[]>([]);
@@ -170,6 +172,16 @@ export default function PublicListingPage() {
   // Reactive snapshot of every field so the live preview re-renders as the
   // user types. Cheap because react-hook-form already tracks the values.
   const watched = useWatch({ control });
+
+  // ── Prefill the contact name from the signed-in account ───────────────────
+  // Only fills an empty field, so a seller who wants a different display name
+  // on the listing keeps their edit.
+  useEffect(() => {
+    const accountName = session?.user?.name;
+    if (accountName && !getValues("sellerName")) {
+      setValue("sellerName", accountName);
+    }
+  }, [session, getValues, setValue]);
 
   // ── localStorage: hydrate uploaded URLs from a previous draft ─────────────
   useEffect(() => {
@@ -221,7 +233,14 @@ export default function PublicListingPage() {
       fd.append("folder", "agnora/cars");
       const res  = await fetch("/api/upload", { method: "POST", body: fd });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json.url) throw new Error(json.error ?? `HTTP ${res.status}`);
+      if (!res.ok || !json.url) {
+        // The server explains exactly what was wrong with the image (blank,
+        // corrupt, too small, out of focus, not a vehicle) and often how to
+        // fix it. Both parts are shown, because "Upload failed" on its own
+        // leaves the seller with nothing to act on.
+        const detail = [json.error, json.recommendation].filter(Boolean).join(" ");
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
       setImages((prev) => prev.map((i) =>
         i.id === id ? { ...i, status: "uploaded", uploadedUrl: json.url } : i,
       ));
@@ -489,6 +508,16 @@ export default function PublicListingPage() {
       setTimeout(() => router.push("/cars"), 1600);
     } else {
       const j = await res.json().catch(() => ({}));
+      // Session expired or email not yet verified — send them where they can
+      // fix it rather than showing a dead-end error. Photos stay in the draft.
+      if (res.status === 401) {
+        router.push(`/login?next=${encodeURIComponent("/sell/new")}`);
+        return;
+      }
+      if (res.status === 403 && j.code === "email_unverified") {
+        router.push("/verify-email");
+        return;
+      }
       setError(j.error ?? "Could not publish your listing. Please try again.");
     }
   }
@@ -526,8 +555,9 @@ export default function PublicListingPage() {
             <span className="italic text-accent">reach serious buyers across Kenya.</span>
           </h1>
           <p className="mt-4 max-w-2xl text-base lg:text-lg text-muted leading-relaxed">
-            Create a trusted listing in minutes. No account required. Upload your
-            photos, verify your VIN, and connect directly with ready-to-buy customers.
+            Create a trusted listing in minutes. Your account keeps every enquiry in
+            one place. Upload your photos, verify your VIN, and connect directly with
+            ready-to-buy customers.
           </p>
 
           <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted">
@@ -1238,6 +1268,12 @@ export default function PublicListingPage() {
                     Buyers see your phone number on the listing so they can call or WhatsApp you directly.
                     Use a number you check often — fast replies sell cars.
                   </p>
+                  {session?.user?.email && (
+                    <p className="mt-2 text-xs text-muted leading-relaxed">
+                      Publishing as <span className="text-foreground font-medium">{session.user.email}</span>.
+                      Your listing stays in your dashboard, where you can edit it or mark it sold.
+                    </p>
+                  )}
                 </Card>
 
                 <Card>

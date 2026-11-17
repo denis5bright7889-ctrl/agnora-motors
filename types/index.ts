@@ -365,3 +365,51 @@ export interface ResearchArticle {
   createdAt: string;
   updatedAt: string;
 }
+
+export type PhotoStatus = "approved" | "pending" | "rejected";
+export type PhotoClassification = "unchecked" | "vehicle" | "not_vehicle" | "uncertain";
+
+export interface CarPhoto {
+  id: string;
+  carId: string;
+  /** Active image shown to buyers — may be an edited derivative of originalUrl. */
+  url: string;
+  originalUrl: string | null;
+  position: number;
+  isPrimary: boolean;
+  status: PhotoStatus;
+  moderatedBy: string | null;
+  moderatedAt: string | null;
+  moderationReason: string | null;
+  classification: PhotoClassification;
+  classificationScore: number | null;
+  classifiedBy: string | null;
+  sha256: string | null;
+  /**
+   * Explainable quality assessment (lib/image-quality.ts). Independent of
+   * `classification`: a sharp photo of a document scores well here and is
+   * still not a vehicle photo. null means never assessed, which is not the
+   * same as a score of 0 ("assessed and unusable").
+   */
+  qualityScore: number | null;
+  qualityVerdict: PhotoQualityVerdict | null;
+  qualityDetail: PhotoQualityDetail | null;
+  width: number | null;
+  height: number | null;
+  /** Cloudinary asset id, used to delete the stored file with the row. */
+  publicId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type PhotoQualityVerdict = "good" | "acceptable" | "review" | "reject" | "unknown";
+
+/** The persisted, human-readable part of a quality assessment. */
+export interface PhotoQualityDetail {
+  metrics?: Partial<Record<
+    "resolution" | "sharpness" | "brightness" | "contrast" | "exposure",
+    { value: number; rating: "good" | "acceptable" | "poor"; detail: string }
+  >>;
+  reasons?: string[];
+  recommendation?: string | null;
+}
