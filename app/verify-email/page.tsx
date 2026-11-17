@@ -11,6 +11,8 @@ function VerifyEmailForm() {
   const searchParams = useSearchParams();
   const email = searchParams.get("email") ?? "";
   const emailFailed = searchParams.get("emailError") === "1";
+  // Where the user was headed before they were asked to sign up (e.g. /sell/new).
+  const nextUrl = searchParams.get("next") ?? "";
 
   const [digits, setDigits] = useState(["", "", "", "", "", ""]);
   const [error, setError] = useState("");
@@ -47,7 +49,9 @@ function VerifyEmailForm() {
         refs.current[0]?.focus();
       } else {
         setSuccess(true);
-        setTimeout(() => router.push("/login?verified=1"), 1500);
+        const params = new URLSearchParams({ verified: "1" });
+        if (nextUrl) params.set("next", nextUrl);
+        setTimeout(() => router.push(`/login?${params.toString()}`), 1500);
       }
     } finally {
       setLoading(false);

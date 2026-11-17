@@ -1,12 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { signIn } from "next-auth/react";
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +26,19 @@ const schema = z
 type FormData = z.infer<typeof schema>;
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={null}>
+      <RegisterForm />
+    </Suspense>
+  );
+}
+
+function RegisterForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // Preserved through verify-email → login so the user lands back where they
+  // started (e.g. /sell/new) instead of on the home page.
+  const nextUrl = searchParams.get("next") ?? "";
   const [showPw, setShowPw] = useState(false);
   const [serverError, setServerError] = useState("");
 
@@ -62,16 +74,17 @@ export default function RegisterPage() {
         redirect: false,
       });
       if (result?.error) {
-        router.push("/login");
+        router.push(nextUrl ? `/login?next=${encodeURIComponent(nextUrl)}` : "/login");
         return;
       }
-      router.push("/");
+      router.push(nextUrl || "/");
     } else {
       // DB users must verify their email first.
       // If email delivery failed (verificationSent: false), pass a flag so the
       // verify-email page can prompt the user to hit "Resend code" immediately.
       const params = new URLSearchParams({ email: data.email });
       if (json.verificationSent === false) params.set("emailError", "1");
+      if (nextUrl) params.set("next", nextUrl);
       router.push(`/verify-email?${params.toString()}`);
     }
   }

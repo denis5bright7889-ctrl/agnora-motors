@@ -39,9 +39,12 @@ export const proxy = auth((req) => {
     path.startsWith("/dealer-dashboard") ||
     (path.startsWith("/dealer/") && !path.startsWith("/dealer/register"));
   const isAdminDash   = path.startsWith("/admin");
+  // Publishing a car requires an account: the listing is tied to the seller's
+  // user id for lead routing, moderation strikes and the seller dashboard.
+  const isSellForm    = path.startsWith("/sell/new");
 
   // ── Unauthenticated → login ────────────────────────────────────────────────
-  if ((isPrivateDash || isDealerDash || isAdminDash) && !isLoggedIn) {
+  if ((isPrivateDash || isDealerDash || isAdminDash || isSellForm) && !isLoggedIn) {
     const loginUrl = new URL("/login", nextUrl);
     loginUrl.searchParams.set("next", path);
     return NextResponse.redirect(loginUrl);
@@ -50,7 +53,7 @@ export const proxy = auth((req) => {
   if (!isLoggedIn) return NextResponse.next({ request: { headers: reqHeaders } });
 
   // ── Email verification gate (dashboard routes only) ────────────────────────
-  const needsVerify = isPrivateDash || isDealerDash;
+  const needsVerify = isPrivateDash || isDealerDash || isSellForm;
   if (needsVerify && !isVerified && !path.startsWith("/verify-email")) {
     const verifyUrl = new URL("/verify-email", nextUrl);
     if (req.auth?.user?.email) verifyUrl.searchParams.set("email", req.auth.user.email);

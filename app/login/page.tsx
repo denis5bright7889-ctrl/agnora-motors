@@ -201,9 +201,13 @@ export default function LoginPage() {
 
         <p className="mt-6 text-center text-sm text-muted">
           Don't have an account?{" "}
-          <Link href="/register" className="font-medium text-foreground hover:text-accent transition-colors">
-            Create one free
-          </Link>
+          <Suspense fallback={
+            <Link href="/register" className="font-medium text-foreground hover:text-accent transition-colors">
+              Create one free
+            </Link>
+          }>
+            <RegisterLink />
+          </Suspense>
         </p>
         <p className="mt-2 text-center text-sm text-muted">
           Are you a dealer?{" "}
@@ -213,6 +217,20 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// Carries the post-login destination into sign-up, so someone sent here from
+// /sell/new lands back on the listing form once their account is ready.
+function RegisterLink() {
+  const nextUrl = useSearchParams().get("next") ?? "";
+  return (
+    <Link
+      href={nextUrl ? `/register?next=${encodeURIComponent(nextUrl)}` : "/register"}
+      className="font-medium text-foreground hover:text-accent transition-colors"
+    >
+      Create one free
+    </Link>
   );
 }
 

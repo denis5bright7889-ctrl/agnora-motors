@@ -73,8 +73,8 @@ export default function SellPage() {
             <SellPathCard
               icon={Car}
               title="Private seller"
-              description="List your own car with no account needed. Buyers contact you directly. Great for individual vehicle sales with full control."
-              features={["Free listing", "No sign-up required", "Direct buyer contact", "No dealer fees"]}
+              description="List your own car under a free account. Interested buyers contact you directly, and every enquiry lands in your dashboard."
+              features={["Free listing", "Enquiries in one place", "Direct buyer contact", "No dealer fees"]}
               cta="Create a private listing"
               href="/sell/new"
               accent={false}
@@ -85,7 +85,7 @@ export default function SellPage() {
               description="Sell multiple cars under your business. Access a full dashboard, analytics, and bulk listing tools."
               features={["Unlimited listings", "Business dashboard", "Verified dealer badge", "Priority support"]}
               cta="List as a dealer"
-              href="/sell/new"
+              href="/dealer/register"
               accent={true}
             />
           </div>

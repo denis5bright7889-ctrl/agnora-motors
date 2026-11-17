@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createPublicCar, getCarsByIds, getPublicCars, isDbConfigured, ListingQualityError } from "@/lib/db";
+import { auth } from "@/auth";
+import {
+  createPublicCar, getCarsByIds, getPublicCars, isDbConfigured,
+  ListingQualityError, updateUserRole, setSellerTypeIfUnset,
+} from "@/lib/db";
+import { normalizeVin } from "@/lib/quality-policy";
+import { validateIdentifier } from "@/lib/vin-validate";
 import { publishEvent } from "@/lib/realtime";
 import { cars as STATIC_CARS } from "@/data/cars";
 import type { Car, Specifications } from "@/types";
@@ -85,7 +91,8 @@ export async function GET(req: Request) {
   }
 }
 
-// Public, login-free car listing. Anyone can post — no account required.
+// Private-seller listing. Requires a signed-in, email-verified account; the
+// owning user is taken from the session, never from the request body.
 const createSchema = z.object({
   sellerName: z.string().min(2).max(120),
   sellerPhone: z.string().min(9).max(20),
@@ -111,8 +118,26 @@ const createSchema = z.object({
   previousOwners: z.coerce.number().int().min(0).max(20).optional(),
   exteriorColor:  z.string().max(40).optional(),
   interiorColor:  z.string().max(40).optional(),
-  // PR6b
-  vin:                     z.string().min(11).max(20).optional(),
+  // PR6b — normalised before the length check so a VIN typed with dashes or
+  // spaces is judged on its real content, and so the stored value doesn't
+  // depend on whether it was typed on a phone keyboard or pasted on a desktop.
+  // Validation is delegated to lib/vin-validate.ts so the seller gets the
+  // actual reason rather than one generic length complaint. A well-formed
+  // Japanese chassis number, or an identifier in a format we don't model yet,
+  // is accepted and flagged for review - only a structurally broken
+  // identifier is refused here.
+  vin: z.string()
+    .transform(normalizeVin)
+    .superRefine((v, ctx) => {
+      const result = validateIdentifier(v);
+      if (!result.acceptable) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: result.message ?? "That VIN or chassis number isn't valid.",
+        });
+      }
+    })
+    .optional(),
   vinVerified:             z.boolean().optional(),
   serviceHistoryAvailable: z.boolean().optional(),
   ownershipVerified:       z.boolean().optional(),
@@ -209,6 +234,20 @@ function normalizeSpecifications(
 }
 
 export async function POST(req: Request) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json(
+      { error: "Sign in to publish a listing.", code: "unauthenticated" },
+      { status: 401 },
+    );
+  }
+  if (!session.user.emailVerified && session.user.role !== "admin") {
+    return NextResponse.json(
+      { error: "Verify your email address before publishing a listing.", code: "email_unverified" },
+      { status: 403 },
+    );
+  }
+
   if (!isDbConfigured()) {
     return NextResponse.json({ error: "Listings are not available right now." }, { status: 503 });
   }
@@ -235,7 +274,24 @@ export async function POST(req: Request) {
   });
 
   try {
-    const car = await createPublicCar({ ...data, specifications: normalisedSpecs });
+    const car = await createPublicCar({
+      ...data,
+      specifications: normalisedSpecs,
+      sellerName: data.sellerName.trim() || session.user.name || "Private seller",
+      sellerUserId: session.user.id,
+    });
+
+    // A buyer who publishes their first car becomes a private seller, so the
+    // seller dashboard (which the middleware gates on this role) opens for them.
+    if (session.user.role === "buyer") {
+      updateUserRole(session.user.id, "private_seller").catch(() => {});
+    }
+
+    // Seller type is a separate axis from role and from verification: listing a
+    // car makes you a one-time seller, and says nothing about whether you are
+    // verified. Never overwrites an existing dealer/verified_seller value.
+    setSellerTypeIfUnset(session.user.id, "one_time_seller").catch(() => {});
+
     publishEvent("listing_created", {
       carId: car.id, make: car.make, model: car.model,
       year: car.year, price: car.price, dealerId: null,
