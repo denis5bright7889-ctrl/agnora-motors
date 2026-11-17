@@ -122,16 +122,45 @@ async function runFile(path, filename) {
   }
 }
 
-// ── discover and run all /db/*.sql in deterministic order ───────────────────
-// schema.sql always runs first (it defines tables the others may extend),
-// then everything else alphabetically.
+// ── discover and run every .sql file in deterministic order ─────────────────
+// Order: schema.sql first (it defines the tables the rest extend), then the
+// remaining db/*.sql alphabetically, then db/migrations/*.sql by filename —
+// those are date-prefixed, so filename order is chronological order.
+//
+// db/migrations/ was previously NOT scanned: the readdir was filtered to
+// isFile(), which silently skipped the subdirectory. Every migration in it had
+// therefore never been applied to any database, which is why car_photos did
+// not exist even though its migration had been written. Migrations that are
+// never run are worse than no migrations, because the schema appears to be
+// under version control while the database quietly diverges from it.
 const dbDir = "db";
-const all = readdirSync(dbDir).filter((f) => f.endsWith(".sql") && statSync(join(dbDir, f)).isFile());
-const ordered = ["schema.sql", ...all.filter((f) => f !== "schema.sql").sort()];
+const migDir = join(dbDir, "migrations");
+
+const rootFiles = readdirSync(dbDir)
+  .filter((f) => f.endsWith(".sql") && statSync(join(dbDir, f)).isFile());
+
+let migrationFiles = [];
+try {
+  if (statSync(migDir).isDirectory()) {
+    migrationFiles = readdirSync(migDir)
+      .filter((f) => f.endsWith(".sql") && statSync(join(migDir, f)).isFile())
+      .sort();
+  }
+} catch {
+  // No migrations directory yet — nothing to add.
+}
+
+const ordered = [
+  ...["schema.sql", ...rootFiles.filter((f) => f !== "schema.sql").sort()]
+    .map((f) => [join(dbDir, f), f]),
+  // Labelled with the subdirectory so schema_migrations rows stay distinct
+  // from any same-named file in db/.
+  ...migrationFiles.map((f) => [join(migDir, f), `migrations/${f}`]),
+];
 
 let allOk = true;
-for (const f of ordered) {
-  const r = await runFile(join(dbDir, f), f);
+for (const [path, label] of ordered) {
+  const r = await runFile(path, label);
   allOk = r.ok && allOk;
 }
 
