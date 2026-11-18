@@ -1,7 +1,18 @@
-import { readFileSync } from "node:fs";
+// Creates a dealer, a listing and reviews, checks the trust signals render on
+// /cars?sort=trust, then deletes them again.
+//
+// This script WRITES. It previously read .env.local directly, which meant it
+// targeted the live database on every run and nothing but the operator's
+// memory prevented that. It now asks the guard for a connection string and is
+// refused unless the target is provably a test database. See
+// scripts/lib/require-test-database.mjs.
+//
+//   TEST_DATABASE_URL=postgres://...@localhost:5432/agnora_test \
+//   AGNORA_ALLOW_TEST_WRITES=1 node scripts/verify-card.mjs
 import { neon } from "@neondatabase/serverless";
-const env = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
-const url = env.match(/^\s*DATABASE_URL\s*=\s*(.+)\s*$/m)[1].trim().replace(/^["']|["']$/g, "");
+import { requireTestDatabase } from "./lib/require-test-database.mjs";
+
+const url = requireTestDatabase({ scriptName: "scripts/verify-card.mjs" });
 const sql = neon(url);
 const tag = Math.random().toString(36).slice(2, 8);
 const slug = "cardco-" + tag;
