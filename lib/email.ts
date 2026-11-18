@@ -8,7 +8,12 @@ function getResend() {
 
 const FROM = "Agnora Motors <support@agnora-motors.com>";
 
-export async function sendVerificationEmail(to: string, name: string, code: string): Promise<void> {
+export async function sendVerificationEmail(
+  to: string,
+  name: string,
+  code: string,
+  purpose: OtpPurpose = "verify",
+): Promise<void> {
   if (!process.env.RESEND_API_KEY) {
     console.error("[email] RESEND_API_KEY is not set — cannot send verification email");
     throw new Error("Email service is not configured");
@@ -20,13 +25,13 @@ export async function sendVerificationEmail(to: string, name: string, code: stri
   // user's inbox" into "attacker needs the dashboard". Operational tracing
   // keeps the recipient and the provider's message id, which is enough to
   // follow a delivery without carrying the secret.
-  console.log("[email] sending verification code to=%s", to);
+  console.log("[email] sending %s code to=%s", purpose, to);
 
   const { data, error } = await getResend().emails.send({
     from: FROM,
     to,
-    subject: "Your Agnora verification code",
-    html: buildOtpEmail(name, code),
+    subject: OTP_COPY[purpose].subject,
+    html: buildOtpEmail(name, code, purpose),
   });
 
   if (error) {
@@ -37,13 +42,50 @@ export async function sendVerificationEmail(to: string, name: string, code: stri
   console.log("[email] Email sent successfully id=%s to=%s", data?.id, to);
 }
 
-function buildOtpEmail(name: string, code: string): string {
+/**
+ * The two one-time codes are stored in different columns with different
+ * lifetimes, but both were sent through this one template, so the emails were
+ * indistinguishable. A user with both in their inbox could not tell which
+ * code belonged to which form, and typing the wrong one failed as "expired".
+ */
+export type OtpPurpose = "verify" | "reset";
+
+const OTP_COPY: Record<OtpPurpose, {
+  subject: string; title: string; heading: string;
+  intro: (name: string) => string; expiry: string;
+}> = {
+  verify: {
+    subject: "Your Agnora verification code",
+    title:   "Verification code",
+    heading: "Verification code",
+    intro: (name) =>
+      `Hi ${name}, confirm it&rsquo;s you.<br/>` +
+      `Enter the code below to verify your email and continue signing in to Agnora Motors.`,
+    // Matches setVerificationCode().
+    expiry: "15 minutes",
+  },
+  reset: {
+    subject: "Reset your Agnora Motors password",
+    title:   "Password reset code",
+    heading: "Password reset code",
+    intro: (name) =>
+      `Hi ${name}, we received a request to reset your Agnora Motors password.<br/>` +
+      `Enter the code below on the password reset page to choose a new password. ` +
+      `If you did not ask for this, you can ignore this email &mdash; your password will not change.`,
+    // Matches setResetCode(). The template previously said 15 minutes for
+    // both, which was simply wrong for a reset code.
+    expiry: "30 minutes",
+  },
+};
+
+function buildOtpEmail(name: string, code: string, purpose: OtpPurpose = "verify"): string {
+  const copy = OTP_COPY[purpose];
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0" />
-  <title>Verification code</title>
+  <title>${copy.title}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f2f2f3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 
@@ -81,14 +123,12 @@ function buildOtpEmail(name: string, code: string): string {
               <!-- Title -->
               <h1 style="margin:0 0 6px;font-size:22px;font-weight:700;
                          color:#111111;letter-spacing:-0.4px;line-height:1.2;">
-                Verification code
+                ${copy.heading}
               </h1>
 
               <!-- Intro -->
               <p style="margin:0 0 28px;font-size:15px;line-height:1.65;color:#555555;">
-                Hi ${name.trim() || "there"}, confirm it&rsquo;s you.<br/>
-                Enter the code below to verify your email and continue
-                signing in to Agnora Motors.
+                ${copy.intro(name.trim() || "there")}
               </p>
 
               <!-- OTP block -->
@@ -109,7 +149,7 @@ function buildOtpEmail(name: string, code: string): string {
 
               <!-- Expiry -->
               <p style="margin:0 0 28px;font-size:13px;color:#999999;text-align:center;">
-                Expires in <strong style="color:#555555;">15 minutes</strong>
+                Expires in <strong style="color:#555555;">${copy.expiry}</strong>
               </p>
 
               <!-- Divider -->
@@ -227,4 +267,12 @@ function buildSellerContactEmail(name: string | null, message: string): string {
   </table>
 </body>
 </html>`;
+}
+
+/**
+ * Password-reset code. A thin wrapper so the reset path cannot accidentally
+ * send the verification wording, which is how the two became identical.
+ */
+export async function sendPasswordResetEmail(to: string, name: string, code: string): Promise<void> {
+  return sendVerificationEmail(to, name, code, "reset");
 }

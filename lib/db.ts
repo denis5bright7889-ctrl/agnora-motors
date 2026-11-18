@@ -210,27 +210,43 @@ export async function setResetCode(email: string, code: string): Promise<boolean
   return rows.length > 0;
 }
 
+/**
+ * Consumes a reset code and sets the new password. Returns false when the
+ * code does not match, has expired, or has already been used.
+ *
+ * This is ONE statement on purpose. It used to SELECT the row and then UPDATE
+ * it, which left a window between the two: a double-clicked form or two
+ * parallel requests could both pass the SELECT and both run the UPDATE, so a
+ * single code reset the password twice — the second write silently winning.
+ * Moving the match into the UPDATE's WHERE makes the row itself the lock.
+ * The first statement nulls reset_code, so the second matches nothing and
+ * returns false, which is exactly the "already used" answer we want.
+ *
+ * The provider merge is done in SQL rather than read-modify-write for the
+ * same reason: reading it first would reintroduce the window it was meant to
+ * close. 'email' is appended only when absent, so a Google account that sets
+ * a password ends up as 'google,email' and keeps both sign-in methods.
+ */
 export async function consumeResetCode(email: string, code: string, newPasswordHash: string): Promise<boolean> {
-  const rows = await query<{ id: string; provider: string }>(
-    `SELECT id, provider FROM users
-     WHERE email = $1 AND reset_code = $2 AND reset_code_expires_at > NOW()
-     LIMIT 1`,
-    [normalizeEmail(email), code],
-  );
-  const row = rows[0];
-  if (!row) return false;
-  const merged = mergeProvider(row.provider, "email");
-  await query(
+  const rows = await query<{ id: string }>(
     `UPDATE users
-     SET password_hash = $1,
-         provider = $2,
-         reset_code = NULL,
-         reset_code_expires_at = NULL,
-         email_verified = TRUE
-     WHERE id = $3`,
-    [newPasswordHash, merged, row.id],
+        SET password_hash = $3,
+            provider = CASE
+              WHEN provider IS NULL OR provider = '' THEN 'email'
+              WHEN provider = 'email' OR provider LIKE 'email,%'
+                OR provider LIKE '%,email' OR provider LIKE '%,email,%' THEN provider
+              ELSE provider || ',email'
+            END,
+            reset_code = NULL,
+            reset_code_expires_at = NULL,
+            email_verified = TRUE
+      WHERE email = $1
+        AND reset_code = $2
+        AND reset_code_expires_at > NOW()
+      RETURNING id`,
+    [normalizeEmail(email), code, newPasswordHash],
   );
-  return true;
+  return rows.length > 0;
 }
 
 export async function setVerificationCode(email: string, code: string): Promise<void> {

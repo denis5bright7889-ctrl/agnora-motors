@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isDbConfigured, setResetCode, getUserAuthMethods } from "@/lib/db";
-import { sendVerificationEmail } from "@/lib/email";
+import { sendPasswordResetEmail } from "@/lib/email";
 import { emailSchema, normalizeEmail } from "@/lib/email-normalize";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent } from "@/lib/auth-audit";
@@ -26,7 +26,19 @@ export async function POST(req: Request) {
 
   // Rate limit by email so a single attacker can't blast codes to one inbox.
   const rl = checkRateLimit(`reset:${email}`, 3, 60_000);
-  if (!rl.ok) return GENERIC;
+  if (!rl.ok) {
+    // Previously this returned GENERIC - "a reset code has been sent" - while
+    // sending nothing. The user then waited for an email that was never
+    // coming and concluded the older code had expired.
+    //
+    // This reply is identical whether or not the account exists, so it still
+    // reveals nothing: the limiter is keyed on the submitted address, not on
+    // whether it matches a user.
+    return NextResponse.json(
+      { ok: false, message: "Too many requests. Please wait a minute before requesting another code." },
+      { status: 429 },
+    );
+  }
 
   if (!isDbConfigured()) return GENERIC;
 
@@ -42,7 +54,10 @@ export async function POST(req: Request) {
     await setResetCode(email, code);
 
     // Best-effort email — failure does NOT change response (still GENERIC).
-    sendVerificationEmail(email, "Reset code", code).catch((err) => {
+    // Was sendVerificationEmail(email, "Reset code", code) - which both sent
+    // the verification wording AND rendered "Hi Reset code," as the greeting,
+    // because the second argument is the recipient's name.
+    sendPasswordResetEmail(email, "there", code).catch((err) => {
       console.warn("[forgot-password] email send failed:", err instanceof Error ? err.message : err);
     });
 

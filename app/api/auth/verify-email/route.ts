@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyEmailCode, isDbConfigured } from "@/lib/db";
 import { emailSchema } from "@/lib/email-normalize";
+import { otpSchema } from "@/lib/otp-code";
 
 export const runtime = "nodejs";
 
 const schema = z.object({
   email: emailSchema(),
-  code: z.string().length(6),
+  code: otpSchema(),
 });
 
 export async function POST(req: Request) {

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { isDbConfigured, consumeResetCode } from "@/lib/db";
 import { emailSchema, normalizeEmail } from "@/lib/email-normalize";
+import { otpSchema } from "@/lib/otp-code";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent } from "@/lib/auth-audit";
 
@@ -10,7 +11,7 @@ export const runtime = "nodejs";
 
 const schema = z.object({
   email:    emailSchema(),
-  code:     z.string().length(6),
+  code:     otpSchema(),
   password: z.string().min(8),
 });
 
@@ -20,7 +21,18 @@ export async function POST(req: Request) {
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+    // Name the field that is wrong. A blanket "Invalid input" is what made a
+    // pasted code carrying a newline look like an expired code.
+    const field = parsed.error.issues[0]?.path?.[0];
+    const error =
+      field === "code"
+        ? "Enter the 6-digit code from your email."
+        : field === "password"
+          ? "Your new password must be at least 8 characters."
+          : field === "email"
+            ? "Please enter a valid email address."
+            : "Please check the details you entered.";
+    return NextResponse.json({ error, code: "invalid_input", field }, { status: 400 });
   }
 
   const email = normalizeEmail(parsed.data.email);
@@ -40,7 +52,21 @@ export async function POST(req: Request) {
     const ok = await consumeResetCode(email, parsed.data.code, passwordHash);
     if (!ok) {
       recordAuthEvent("auth_password_set", { email, stage: "code_invalid" });
-      return NextResponse.json({ error: "Invalid or expired code" }, { status: 400 });
+      // One message for every failure, on purpose. Separating "already used"
+      // from "expired" would mean reporting reset state to anyone who can
+      // post to this endpoint, and distinguishing them server-side would
+      // require retaining a consumed code to compare against — more secret
+      // state, for a worse outcome. The wording instead covers both cases and
+      // points forward, which is what the user actually needs.
+      return NextResponse.json(
+        {
+          error:
+            "That code is no longer valid — it may have expired or already been used. " +
+            "If you have already set a new password, try signing in. Otherwise request a new code.",
+          code: "code_not_valid",
+        },
+        { status: 400 },
+      );
     }
     recordAuthEvent("auth_password_set", { email, stage: "completed" });
     return NextResponse.json({ ok: true });

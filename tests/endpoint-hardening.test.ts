@@ -242,6 +242,7 @@ test("no one-time code is ever written to the logs", () => {
 test("the verification email still logs enough to trace a delivery", () => {
   // Removing the secret must not remove operational visibility.
   const src = code("lib/email.ts");
-  assert.match(src, /console\.log\("\[email\] sending verification code to=%s"/);
+  // Records WHICH kind of code was sent and to whom, but never the code.
+  assert.match(src, /console\.log\("\[email\] sending %s code to=%s", purpose, to\)/);
   assert.match(src, /Email sent successfully id=%s/, "the provider message id is how a delivery is traced");
 });
