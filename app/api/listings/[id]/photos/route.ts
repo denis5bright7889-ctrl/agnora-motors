@@ -47,11 +47,13 @@ export async function PATCH(
   }
 
   // Both writes are scoped by car_id in SQL, so ids belonging to another
-  // listing silently affect nothing rather than crossing the boundary.
+  // listing affect nothing rather than crossing the boundary.
   if (body.action === "reorder") {
     await reorderCarPhotos(id, body.photoIds);
-  } else {
-    await setPrimaryCarPhoto(id, body.photoId);
+  } else if (!(await setPrimaryCarPhoto(id, body.photoId))) {
+    // The photo is not part of this listing. Reporting success here would be
+    // misleading: the client would show a new primary that was never set.
+    return NextResponse.json({ error: "Photo not found on this listing" }, { status: 404 });
   }
 
   return NextResponse.json({ photos: await listCarPhotos(id) });

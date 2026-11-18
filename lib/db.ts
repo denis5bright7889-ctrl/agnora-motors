@@ -3604,12 +3604,37 @@ export async function isPublicIdInUse(publicId: string, excludePhotoId?: string)
   return Number(rows[0]?.n ?? 0) > 0;
 }
 
-/** Swaps the primary flag atomically — the partial unique index forbids two. */
-export async function setPrimaryCarPhoto(carId: string, photoId: string): Promise<void> {
-  await query(`UPDATE car_photos SET is_primary = FALSE, updated_at = NOW()
-                WHERE car_id = $1 AND is_primary`, [carId]);
-  await query(`UPDATE car_photos SET is_primary = TRUE, updated_at = NOW()
-                WHERE id = $1 AND car_id = $2`, [photoId, carId]);
+/**
+ * Moves the primary flag to one photo. Returns false when the photo does not
+ * belong to this listing, in which case nothing changed.
+ *
+ * This is deliberately a single statement. It used to be two UPDATEs — clear
+ * the old primary, then set the new one — which had two problems:
+ *
+ *   1. They were not in a transaction, so a failure between them left the
+ *      listing with no primary photo at all.
+ *   2. The clear was scoped only by `car_id AND is_primary`, while the set was
+ *      additionally scoped by photo id. A photoId belonging to another listing
+ *      (or to none) therefore cleared the real primary and promoted nothing.
+ *
+ * The EXISTS guard makes the whole thing a no-op unless the target really is a
+ * photo of this listing, so a bad id can no longer strip a listing's primary.
+ * The partial unique index still forbids two primaries as a backstop.
+ */
+export async function setPrimaryCarPhoto(carId: string, photoId: string): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `UPDATE car_photos p
+        SET is_primary = (p.id = $2::uuid), updated_at = NOW()
+      WHERE p.car_id = $1::uuid
+        AND (p.is_primary OR p.id = $2::uuid)
+        AND EXISTS (
+          SELECT 1 FROM car_photos t
+           WHERE t.id = $2::uuid AND t.car_id = $1::uuid
+        )
+      RETURNING p.id`,
+    [carId, photoId],
+  );
+  return rows.length > 0;
 }
 
 /** Applies an explicit display order. Ids not belonging to carId are ignored. */

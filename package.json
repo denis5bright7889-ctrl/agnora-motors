@@ -9,7 +9,7 @@
     "lint": "next lint",
     "db:migrate": "node scripts/apply-migrations.mjs",
     "detect:setup": "node scripts/setup-vehicle-detection.mjs",
-    "test": "node --experimental-strip-types --test \"tests/**/*.test.ts\""
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --import ./tests/helpers/register.mjs --test \"tests/**/*.test.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
