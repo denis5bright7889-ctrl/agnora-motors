@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { adminModerateCar, adminDeleteCar, getCarByIdAdmin } from "@/lib/db";
+import { adminModerateCar, adminDeleteCar, getCarByIdAdmin, listCarPhotos } from "@/lib/db";
+import { checkPublishRequirements, explainRefusal } from "@/lib/publish-requirements";
 import { auditLog, type AdminAction } from "@/lib/admin-logger";
 import type { CarStatus } from "@/types";
 
@@ -22,12 +23,23 @@ async function requireAdmin() {
 // Maps each soft-status transition to the audit-log verb we want recorded.
 // Anything not in this map is rejected as an invalid moderation status.
 const STATUS_TO_ACTION: Record<string, AdminAction> = {
-  active:   "listing_approve",
-  hidden:   "listing_hide",
-  archived: "listing_archive",
-  rejected: "listing_reject",
-  sold:     "listing_mark_sold",
+  active:    "listing_approve",
+  hidden:    "listing_hide",
+  archived:  "listing_archive",
+  rejected:  "listing_reject",
+  sold:      "listing_mark_sold",
+  suspended: "listing_suspend",
 };
+
+// Transitions that take a listing public. These are the only ones that have
+// to satisfy the publication requirements, and the only ones that can be
+// refused for failing them.
+const PUBLISHING_STATUSES = new Set<CarStatus>(["active"]);
+
+// Transitions that require a written reason. Taking a listing down without
+// one leaves the seller with no idea what to fix, and leaves the next
+// moderator with no idea why it happened.
+const REASON_REQUIRED = new Set<CarStatus>(["rejected", "suspended"]);
 
 export async function PATCH(
   req: Request,
@@ -51,11 +63,11 @@ export async function PATCH(
     );
   }
 
-  // Rejecting a listing without a reason leaves the seller in the dark, which
-  // is the single biggest complaint in marketplaces — require a reason here.
-  if (body.status === "rejected" && !body.reason?.trim()) {
+  // Taking a listing down without a reason leaves the seller in the dark,
+  // which is the single biggest complaint in marketplaces.
+  if (REASON_REQUIRED.has(body.status) && !body.reason?.trim()) {
     return NextResponse.json(
-      { error: "Rejection requires a reason" },
+      { error: `Setting a listing to "${body.status}" requires a reason` },
       { status: 400 },
     );
   }
@@ -66,10 +78,49 @@ export async function PATCH(
   }
 
   const reason = body.reason?.trim() || null;
+
+  // Reinstatement is not a status write. A listing suspended because it was
+  // deficient must not return to public search while it is still deficient,
+  // so every publication requirement is re-checked here and the transition is
+  // refused — with all the reasons at once — if any of them fails.
+  if (PUBLISHING_STATUSES.has(body.status) && carBefore.status !== "active") {
+    const photos = await listCarPhotos(id).catch(() => []);
+    const check = checkPublishRequirements({
+      description: carBefore.description,
+      vin: carBefore.vin,
+      photoCount: photos.length || (carBefore.images?.length ?? 0),
+      approvedPhotoCount: photos.length
+        ? photos.filter((p) => p.status === "approved").length
+        : null,
+    });
+
+    if (!check.ok) {
+      // Record the refusal: an attempt to reinstate is itself something a
+      // later reviewer needs to see, and the listing stays exactly as it was.
+      await auditLog({
+        action:     "listing_reinstate_refused",
+        targetType: "car",
+        targetId:   id,
+        details:    { slug: carBefore.slug, from: carBefore.status, failures: check.failures },
+      });
+      return NextResponse.json(
+        {
+          error:    explainRefusal(check),
+          code:     "publish_requirements_unmet",
+          failures: check.failures,
+          status:   carBefore.status,
+        },
+        { status: 409 },
+      );
+    }
+  }
+
   await adminModerateCar(id, session.user.id, body.status, reason);
 
   await auditLog({
-    action:     STATUS_TO_ACTION[body.status],
+    action:     body.status === "active" && carBefore.status === "suspended"
+      ? "listing_reinstate"
+      : STATUS_TO_ACTION[body.status],
     targetType: "car",
     targetId:   id,
     details:    {

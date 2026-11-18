@@ -118,7 +118,10 @@ export async function createLead(input: CreateLeadInput): Promise<CreateLeadResu
             c.make, c.model, c.year, d.user_id AS "dealerUserId"
      FROM cars c
      LEFT JOIN dealers d ON d.id = c.dealer_id
-     WHERE c.id = $1 LIMIT 1`,
+     -- Only a live listing can receive an enquiry. The id was previously the
+     -- only condition, so posting the id of a suspended, hidden, rejected or
+     -- archived listing still created a lead and notified the seller.
+     WHERE c.id = $1 AND c.status = 'active' LIMIT 1`,
     [input.carId],
   );
   if (carRows.length === 0) return { ok: false, reason: "car_not_found" };

@@ -70,7 +70,7 @@ export default async function AdminCarsPage({
 
       {/* Status summary — every number is a COUNT over the cars table. */}
       <div className="flex flex-wrap gap-2">
-        {(["active", "draft", "hidden", "rejected", "sold", "archived"] as const).map((s) => (
+        {(["active", "pending_review", "draft", "suspended", "hidden", "rejected", "sold", "archived"] as const).map((s) => (
           <Link
             key={s}
             href={`/admin/cars${qs({ status: status === s ? "" : s, page: 1 })}`}
@@ -100,7 +100,7 @@ export default async function AdminCarsPage({
         </div>
         <select name="status" defaultValue={status} className={selectCls}>
           <option value="">All statuses</option>
-          {["active", "draft", "pending", "sold", "hidden", "rejected", "archived"].map((s) => (
+          {["active", "pending_review", "draft", "suspended", "sold", "hidden", "rejected", "archived"].map((s) => (
             <option key={s} value={s} className="capitalize">{s}</option>
           ))}
         </select>

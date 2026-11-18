@@ -16,6 +16,10 @@ type Verb =
 const VERBS: Verb[] = [
   { kind: "status", label: "Approve",   status: "active",   promptReason: false, reasonRequired: false, confirm: "Approve and publish this listing?" },
   { kind: "status", label: "Hide",      status: "hidden",   promptReason: true,  reasonRequired: false, confirm: "Hide this listing from /cars?" },
+  // Suspension is the administrative takedown: distinct from "Hide", which a
+  // seller can also do to their own listing. A reason is mandatory because
+  // the API refuses the transition without one.
+  { kind: "status", label: "Suspend",   status: "suspended", promptReason: true,  reasonRequired: true,  confirm: "Suspend this listing? It is removed from public search and cannot receive enquiries until reinstated." },
   { kind: "status", label: "Reject",    status: "rejected", promptReason: true,  reasonRequired: true,  confirm: "Reject this listing? Owner will see the reason." },
   { kind: "status", label: "Archive",   status: "archived", promptReason: true,  reasonRequired: false, confirm: "Archive this listing? Reversible but invisible everywhere." },
   { kind: "status", label: "Mark sold", status: "sold",     promptReason: false, reasonRequired: false, confirm: "Mark as sold?" },
@@ -98,6 +102,13 @@ export function ModerationActions({
           {VERBS.map((v) => {
             const disabled =
               v.kind === "status" && v.status === currentStatus;
+            // Going to 'active' from a suspension is a reinstatement. The API
+            // re-checks every publication requirement and can refuse, so the
+            // label should not promise a simple approval.
+            const label =
+              v.kind === "status" && v.status === "active" && currentStatus === "suspended"
+                ? "Reinstate"
+                : v.label;
             return (
               <button
                 key={v.label}
@@ -109,7 +120,7 @@ export function ModerationActions({
                 }`}
                 role="menuitem"
               >
-                {busy === v.label ? `${v.label}…` : v.label}
+                {busy === v.label ? `${label}…` : label}
               </button>
             );
           })}
