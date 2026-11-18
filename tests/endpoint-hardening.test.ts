@@ -194,3 +194,54 @@ test("the VIN corrections route is no longer described as public", () => {
   );
   assert.match(VIN_CORRECTIONS_CODE, /await auth\(\)/);
 });
+
+// ---------------------- secret logging ----------------------
+
+test("no one-time code is ever written to the logs", () => {
+  // lib/email.ts logged `code=%s` with the live OTP. On a hosted platform
+  // those lines are retained and searchable, so anyone with log access could
+  // read a valid reset code - turning "attacker needs the user's inbox" into
+  // "attacker needs the dashboard".
+  //
+  // Asserted against the source rather than behaviour: the defect is "this
+  // value appears in a log call", which is a property of the code, and a
+  // behavioural test would pass again the moment it reappeared on a path the
+  // test does not exercise.
+  const files = [
+    "lib/email.ts",
+    "app/api/auth/forgot-password/route.ts",
+    "app/api/auth/reset-password/route.ts",
+    "app/api/auth/resend-verification/route.ts",
+    "app/api/auth/verify-email/route.ts",
+    "app/api/auth/register/route.ts",
+    "auth.ts",
+  ];
+
+  const CONSOLE_CALL = /console\.(?:log|warn|error|info|debug)\s*\(([^;]*?)\)\s*;/gis;
+  const SECRET_IDENT = /\b(?:code|otp|password|passwordHash|token|secret)\b/i;
+  const STRING_LITERAL = /(["'`])(?:\\.|(?!\1)[^\\])*\1/g;
+
+  for (const file of files) {
+    const src = code(file);
+    for (const match of src.matchAll(CONSOLE_CALL)) {
+      // Drop the message string(s) first: "sending verification code to=%s"
+      // mentions the word without logging the value. Only the remaining
+      // ARGUMENTS can actually carry a secret.
+      const args = match[1].replace(STRING_LITERAL, "");
+      if (!SECRET_IDENT.test(args)) continue;
+      // A Postgres SQLSTATE (e.code / err.code) is a diagnostic like "23505",
+      // not a credential, and is genuinely useful in an error log.
+      if (/\b(?:e|err|error)\.code\b/.test(args)) continue;
+      assert.fail(
+        `${file} logs a secret-bearing value: ${match[0].replace(/\s+/g, " ").slice(0, 120)}`,
+      );
+    }
+  }
+});
+
+test("the verification email still logs enough to trace a delivery", () => {
+  // Removing the secret must not remove operational visibility.
+  const src = code("lib/email.ts");
+  assert.match(src, /console\.log\("\[email\] sending verification code to=%s"/);
+  assert.match(src, /Email sent successfully id=%s/, "the provider message id is how a delivery is traced");
+});

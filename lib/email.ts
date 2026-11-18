@@ -14,8 +14,13 @@ export async function sendVerificationEmail(to: string, name: string, code: stri
     throw new Error("Email service is not configured");
   }
 
-  console.log("[email] OTP generated for=%s code=%s", to, code);
-  console.log("[email] Sending email to=%s", to);
+  // The one-time code is a credential for the lifetime of its window. It is
+  // never logged: on a hosted platform these lines are retained, searchable
+  // and readable by anyone with log access, which turns "attacker needs the
+  // user's inbox" into "attacker needs the dashboard". Operational tracing
+  // keeps the recipient and the provider's message id, which is enough to
+  // follow a delivery without carrying the secret.
+  console.log("[email] sending verification code to=%s", to);
 
   const { data, error } = await getResend().emails.send({
     from: FROM,

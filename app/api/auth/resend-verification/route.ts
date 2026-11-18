@@ -32,7 +32,10 @@ export async function POST(req: Request) {
 
     const code = randomCode();
     await setVerificationCode(parsed.data.email, code);
-    console.log("[resend-verification] OTP saved for email=%s", parsed.data.email);
+    // Deliberately records only that a code was issued, not the code itself
+    // and not who it was for: "who requested a reset" is itself worth little
+    // to an operator and a lot to an attacker reading logs.
+    console.log("[resend-verification] verification code issued");
 
     await sendVerificationEmail(parsed.data.email, user.name ?? "there", code);
 
