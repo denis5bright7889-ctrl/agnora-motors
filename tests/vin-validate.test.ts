@@ -116,12 +116,75 @@ test("Japanese chassis numbers are valid and are not forced into VIN format", ()
 });
 
 test("a chassis number with an unrecognised model code is flagged, not rejected", () => {
+  // Deliberately NOT reported as valid. The shape "letters then 5-7 digits"
+  // is weak evidence on its own — it also describes engine codes and part
+  // numbers — so an unattributable match goes to a human rather than being
+  // asserted as a valid chassis number.
   const r = validateIdentifier("QQQQ9-123456");
-  assert.equal(r.kind, "jp_chassis");
-  assert.equal(r.status, "valid");
-  assert.equal(r.acceptable, true);
+  assert.equal(r.kind, "jp_chassis", "the shape is still recognised as chassis-like");
+  assert.equal(r.status, "unrecognised");
+  assert.equal(r.acceptable, true, "a seller is never refused for an unfamiliar format");
   assert.equal(r.needsReview, true);
   assert.equal(r.manufacturer, undefined, "no manufacturer may be invented");
+});
+
+test("an engine code is not accepted as a chassis number", () => {
+  // Regression for a real listing: a Subaru Legacy was published with
+  // "EJ20-D351259" as its VIN. EJ20 is the Subaru boxer engine family, and
+  // the string is 11 characters of letters-then-digits, so it passed both the
+  // publish length rule and the chassis shape and was called valid.
+  const r = validateIdentifier("EJ20-D351259");
+  assert.equal(r.normalized, "EJ20D351259");
+  assert.notEqual(r.status, "valid", "an engine code must never be valid");
+  assert.equal(r.status, "suspect");
+  assert.equal(r.kind, "unknown", "it is not a chassis number, so do not claim it is");
+  assert.equal(r.needsReview, true);
+  assert.equal(r.manufacturer, undefined);
+  assert.match(r.message ?? "", /engine code/i, "the seller must be told what is wrong");
+  assert.match(r.message ?? "", /chassis number is on the plate/i, "and where to find the right one");
+});
+
+test("engine families across manufacturers are all caught", () => {
+  for (const input of [
+    "EJ25-123456",   // Subaru
+    "SR20-987654",   // Nissan
+    "RB26-112233",   // Nissan
+    "K20A-445566",   // Honda
+    "4G63-778899",   // Mitsubishi
+    "VQ35-204060",   // Nissan
+    "FA20-135790",   // Subaru
+    "M13A-246800",   // Suzuki
+  ]) {
+    const r = validateIdentifier(input);
+    assert.equal(r.status, "suspect", `${input} should be flagged as an engine code`);
+    assert.notEqual(r.kind, "jp_chassis", `${input} must not be called a chassis number`);
+  }
+});
+
+test("a genuine chassis code is not caught by the engine-code check", () => {
+  // The guard must not become so broad that it refuses real chassis numbers.
+  for (const [input, make] of [
+    ["ZVW30-1234567", "Toyota"],
+    ["ZZT240-0012345", "Toyota"],
+    ["GD1-1234567", "Honda"],
+    ["Z33-123456", "Nissan"],
+    ["GDB-123456", "Subaru"],
+  ] as const) {
+    const r = validateIdentifier(input);
+    assert.equal(r.status, "valid", `${input} should remain valid`);
+    assert.equal(r.kind, "jp_chassis");
+    assert.equal(r.manufacturer, make);
+    assert.equal(r.needsReview, false, "a recognised code needs no manual check");
+  }
+});
+
+test("a bare engine code with no serial falls through to the length rule", () => {
+  // "EJ20" alone is four characters — too short to be any identifier, and the
+  // length message is the more useful one.
+  const r = validateIdentifier("EJ20");
+  assert.equal(r.status, "invalid");
+  assert.equal(r.acceptable, false);
+  assert.match(r.message ?? "", /too short/i);
 });
 
 test("an identifier in no recognised format is unrecognised, not invalid", () => {
