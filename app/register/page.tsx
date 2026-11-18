@@ -9,11 +9,12 @@ import { signIn } from "next-auth/react";
 import { useState, Suspense } from "react";
 import { Eye, EyeOff, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { emailSchema } from "@/lib/email-normalize";
 
 const schema = z
   .object({
     name: z.string().min(2, "Full name required"),
-    email: z.string().email("Enter a valid email address"),
+    email: emailSchema(),
     password: z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string(),
     terms: z.boolean().refine((v) => v === true, "You must accept the terms"),
@@ -50,19 +51,55 @@ function RegisterForm() {
 
   async function onSubmit(data: FormData) {
     setServerError("");
-    const res = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: data.name,
-        email: data.email,
-        password: data.password,
-      }),
-    });
 
-    const json = await res.json() as { error?: string; verified?: boolean; verificationSent?: boolean };
+    type RegisterResponse = {
+      error?: string;
+      code?: string;
+      verified?: boolean;
+      verificationSent?: boolean;
+    };
+
+    let res: Response;
+    let json: RegisterResponse;
+    try {
+      res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: data.name,
+          email: data.email,
+          password: data.password,
+        }),
+      });
+      // A gateway error can answer with HTML, which is not parseable. Treat
+      // that as the server problem it is rather than letting the throw
+      // escape and leave the form silently doing nothing.
+      json = (await res.json().catch(() => ({}))) as RegisterResponse;
+    } catch {
+      setServerError(
+        "We couldn't reach the server. Check your connection and try again — " +
+        "your details have not been submitted.",
+      );
+      return;
+    }
+
     if (!res.ok) {
-      setServerError(json.error ?? "Registration failed");
+      // The server's message already distinguishes a format problem, an
+      // existing account and an unverified one. Never substitute a claim
+      // about the email being invalid for a failure we cannot explain.
+      setServerError(
+        json.error ??
+          (res.status >= 500
+            ? "Something went wrong on our side. Please try again in a moment."
+            : "We couldn't complete your registration. Please check your details and try again."),
+      );
+
+      // An unverified account is recoverable in one step, so offer it.
+      if (json.code === "email_unverified") {
+        const params = new URLSearchParams({ email: data.email });
+        if (nextUrl) params.set("next", nextUrl);
+        router.push(`/verify-email?${params.toString()}`);
+      }
       return;
     }
 

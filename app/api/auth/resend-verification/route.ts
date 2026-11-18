@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getUserByEmail, setVerificationCode, isDbConfigured } from "@/lib/db";
 import { sendVerificationEmail } from "@/lib/email";
+import { emailSchema } from "@/lib/email-normalize";
 
 export const runtime = "nodejs";
 
-const schema = z.object({ email: z.string().email() });
+const schema = z.object({ email: emailSchema() });
 
 function randomCode() {
   return String(Math.floor(100000 + Math.random() * 900000));

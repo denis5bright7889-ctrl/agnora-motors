@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isDbConfigured, setResetCode, getUserAuthMethods } from "@/lib/db";
 import { sendVerificationEmail } from "@/lib/email";
-import { normalizeEmail } from "@/lib/email-normalize";
+import { emailSchema, normalizeEmail } from "@/lib/email-normalize";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent } from "@/lib/auth-audit";
 
 export const runtime = "nodejs";
 
-const schema = z.object({ email: z.string().email() });
+const schema = z.object({ email: emailSchema() });
 
 // Generic response shared regardless of whether the email exists. Prevents
 // account enumeration through this endpoint.

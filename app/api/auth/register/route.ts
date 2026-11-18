@@ -7,14 +7,14 @@ import {
 import { findLocalUser, createLocalUser } from "@/lib/local-users";
 import { sendVerificationEmail } from "@/lib/email";
 import { publishEvent } from "@/lib/realtime";
-import { normalizeEmail } from "@/lib/email-normalize";
+import { emailSchema, normalizeEmail } from "@/lib/email-normalize";
 import { recordAuthEvent } from "@/lib/auth-audit";
 
 export const runtime = "nodejs";
 
 const schema = z.object({
   name:     z.string().min(2),
-  email:    z.string().email(),
+  email:    emailSchema(),
   password: z.string().min(8),
   role:     z.enum(["buyer", "dealer"]).optional().default("buyer"),
 });
@@ -87,7 +87,21 @@ export async function POST(req: Request) {
     const body   = await req.json();
     const parsed = schema.safeParse(body);
     if (!parsed.success) {
-      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+      // Name the field that is actually wrong. A single "Invalid input" for
+      // every failure is what let a whitespace-padded but perfectly valid
+      // email read as a format problem, hiding the real answer (the address
+      // is already registered) behind a message about validity.
+      const issue = parsed.error.issues[0];
+      const field = issue?.path?.[0];
+      const error =
+        field === "email"
+          ? "Please enter a valid email address."
+          : field === "password"
+            ? "Your password must be at least 8 characters."
+            : field === "name"
+              ? "Please enter your name."
+              : "Please check the details you entered.";
+      return NextResponse.json({ error, code: "invalid_input", field }, { status: 400 });
     }
 
     // Email normalisation: every downstream comparison + insert uses the
@@ -101,9 +115,29 @@ export async function POST(req: Request) {
     // instead of generic 409 — they likely don't realise the account exists.
     const methods = await getUserAuthMethods(data.email);
     if (methods.exists) {
+      // An account that exists but has never been verified needs different
+      // advice from one that is ready to use: telling someone to "please log
+      // in" when sign-in will refuse them for an unverified email sends them
+      // in a circle. getUserAuthMethods already reports this; the branch was
+      // simply never used.
+      if (methods.hasPassword && !methods.emailVerified) {
+        return NextResponse.json(
+          {
+            error:
+              "This email address is already registered, but it hasn't been verified yet. " +
+              "Check your inbox for the verification code, or request a new one.",
+            code: "email_unverified",
+          },
+          { status: 409 },
+        );
+      }
+
       if (methods.hasPassword) {
         return NextResponse.json(
-          { error: "Email already registered", code: "email_in_use" },
+          {
+            error: "This email address is already registered. Please log in.",
+            code: "email_in_use",
+          },
           { status: 409 },
         );
       }

@@ -9,9 +9,10 @@ import { signIn, useSession } from "next-auth/react";
 import { Eye, EyeOff, X, CheckCircle2 } from "lucide-react";
 import { useState, Suspense } from "react";
 import { cn } from "@/lib/utils";
+import { emailSchema } from "@/lib/email-normalize";
 
 const schema = z.object({
-  email: z.string().email("Enter a valid email address"),
+  email: emailSchema(),
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 

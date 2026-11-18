@@ -2,14 +2,14 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { isDbConfigured, consumeResetCode } from "@/lib/db";
-import { normalizeEmail } from "@/lib/email-normalize";
+import { emailSchema, normalizeEmail } from "@/lib/email-normalize";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent } from "@/lib/auth-audit";
 
 export const runtime = "nodejs";
 
 const schema = z.object({
-  email:    z.string().email(),
+  email:    emailSchema(),
   code:     z.string().length(6),
   password: z.string().min(8),
 });

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { verifyEmailCode, isDbConfigured } from "@/lib/db";
+import { emailSchema } from "@/lib/email-normalize";
 
 export const runtime = "nodejs";
 
 const schema = z.object({
-  email: z.string().email(),
+  email: emailSchema(),
   code: z.string().length(6),
 });
 

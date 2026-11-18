@@ -10,7 +10,7 @@ import {
 } from "@/lib/db";
 import { findLocalUser } from "@/lib/local-users";
 import { authConfig } from "./auth.config";
-import { normalizeEmail } from "@/lib/email-normalize";
+import { emailSchema, normalizeEmail } from "@/lib/email-normalize";
 import { checkRateLimit, resetRateLimit } from "@/lib/rate-limit";
 import { recordAuthEvent } from "@/lib/auth-audit";
 
@@ -75,7 +75,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         const parsed = z
-          .object({ email: z.string().email(), password: z.string().min(6) })
+          .object({ email: emailSchema(), password: z.string().min(6) })
           .safeParse(credentials);
 
         if (!parsed.success) {
