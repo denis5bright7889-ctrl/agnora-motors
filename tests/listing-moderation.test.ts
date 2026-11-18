@@ -372,3 +372,37 @@ test("status counts come from the database, not a hand-maintained list", () => {
     "counts must be a GROUP BY over the real table so they cannot drift from it",
   );
 });
+
+test("an administratively removed listing is not resurfaced by wishlist or recently-viewed", () => {
+  // Found by actually suspending a listing in the admin panel: it vanished
+  // from search, but was still listed under "Recently viewed".
+  //
+  // getCarsByIds is deliberately exempt from the public visibility helper, so
+  // a car you saved does not silently disappear while the SELLER has it
+  // hidden, as a draft, pending review or sold. That exemption was written as
+  // "any status", which also covered administrative takedowns — so a listing
+  // suspended for fraud remained reachable from a viewer's own lists, which
+  // is precisely what suspension exists to prevent.
+  const src = readFileSync("lib/db.ts", "utf8");
+  const fn = src.slice(src.indexOf("export async function getCarsByIds"));
+  const query = fn.slice(0, fn.indexOf("`,"));
+
+  assert.match(
+    query,
+    /c\.status <> ALL\(ARRAY\['suspended','rejected','archived'\]\)/,
+    "getCarsByIds must exclude administrative takedowns",
+  );
+
+  for (const takedown of ["suspended", "rejected", "archived"]) {
+    assert.ok(query.includes(`'${takedown}'`), `${takedown} must be excluded`);
+  }
+
+  // The seller-controlled states stay visible to the person who saved them:
+  // narrowing the exemption must not become a blanket status filter.
+  for (const sellerControlled of ["hidden", "draft", "pending_review", "sold"]) {
+    assert.ok(
+      !query.includes(`'${sellerControlled}'`),
+      `${sellerControlled} is seller-controlled and must remain resolvable in a saved list`,
+    );
+  }
+});

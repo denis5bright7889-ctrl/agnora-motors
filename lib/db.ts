@@ -43,7 +43,18 @@ export async function query<T = Record<string, unknown>>(
 // callers would otherwise require.
 //
 // Paths that must NOT call this (per the visibility matrix in the spec):
-//   - getCarsByIds() — wishlist / recently-viewed must resolve hidden listings
+//   - getCarsByIds() — wishlist / recently-viewed must resolve listings the
+//     seller has taken out of public view, so a car you saved does not
+//     silently vanish while it is temporarily hidden, a draft, pending
+//     review, or sold.
+//
+//     That exemption is deliberately NARROWER than "any non-active status".
+//     It covers seller-controlled states only. A listing an ADMINISTRATOR
+//     removed — suspended, rejected or archived — is a takedown, and a
+//     takedown must not be resurfaced by any path. Without that distinction
+//     a listing suspended for fraud still appeared in Recently Viewed and in
+//     the wishlist after it had vanished from search, which is exactly the
+//     behaviour suspension exists to prevent.
 //   - dealer dashboard queries (admin/dealer scope)
 //   - admin dashboard queries
 export function buildPublicListingVisibilityWhere(alias = "c"): string {
@@ -2814,7 +2825,8 @@ export async function getCarsByIds(ids: string[]): Promise<Car[]> {
             COALESCE(d.phone, c.seller_phone)        AS "dealerPhone"
      FROM cars c
      LEFT JOIN dealers d ON d.id = c.dealer_id
-     WHERE c.id::text = ANY($1::text[])`,
+     WHERE c.id::text = ANY($1::text[])
+       AND c.status <> ALL(ARRAY['suspended','rejected','archived'])`,
     // Visibility filter is intentionally OMITTED here. Wishlist and
     // recently-viewed must resolve any saved car — even one that has since
     // been hidden by the quality policy — so the buyer can still see what
