@@ -8,6 +8,8 @@ import {
   ListingQualityError,
 } from "@/lib/db";
 import { publishEvent } from "@/lib/realtime";
+import { assessDescription, describeDescriptionProblem } from "@/lib/description-quality";
+import type { CarStatus } from "@/types";
 
 export const runtime = "nodejs";
 
@@ -39,7 +41,30 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const car = await createDealerCar(dealer.id, body);
+
+    // This path had no description validation at all — the body went straight
+    // to createDealerCar, so a dealer could publish the same keyboard mash
+    // that the public /api/cars path now refuses. Status is assigned
+    // explicitly rather than inherited, so an uncertain description cannot
+    // reach 'active' by taking the column default.
+    const description = assessDescription(body?.description);
+    if (description.verdict === "reject") {
+      return NextResponse.json(
+        {
+          error: describeDescriptionProblem(description),
+          code:  "description_rejected",
+        },
+        { status: 400 },
+      );
+    }
+
+    const requestedStatus: CarStatus = body?.status ?? "active";
+    const status: CarStatus =
+      description.verdict === "review" && requestedStatus === "active"
+        ? "pending_review"
+        : requestedStatus;
+
+    const car = await createDealerCar(dealer.id, { ...body, status });
     publishEvent("listing_created", {
       carId: car.id, make: car.make, model: car.model,
       year: car.year, price: car.price, dealerId: dealer.id,

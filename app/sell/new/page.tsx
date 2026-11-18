@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { trackEvent } from "@/lib/analytics";
 import type { DecodedVehicle } from "@/lib/vin-decoder";
+import { descriptionSchema } from "@/lib/description-quality";
 
 // ─── Schema (same fields, kept as a single form to preserve values across steps) ──
 const schema = z.object({
@@ -31,7 +32,9 @@ const schema = z.object({
   bodyType:     z.enum(["suv", "sedan", "hatchback", "pickup", "coupe", "wagon", "van"]),
   condition:    z.enum(["new", "used", "certified", "foreign_used", "locally_used"]),
   location:    z.string().min(1, "Location required"),
-  description: z.string().min(30, "Description must be at least 30 characters"),
+  // Same assessment the server runs, so the seller is told here rather than
+  // after a round trip. The server remains authoritative.
+  description: descriptionSchema(),
   vin: z.string()
     .min(11, "VIN must be 11–20 characters")
     .max(20, "VIN must be 11–20 characters"),

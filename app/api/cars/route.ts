@@ -6,6 +6,7 @@ import {
   ListingQualityError, updateUserRole, setSellerTypeIfUnset,
 } from "@/lib/db";
 import { normalizeVin } from "@/lib/quality-policy";
+import { assessDescription, descriptionSchema } from "@/lib/description-quality";
 import { validateIdentifier } from "@/lib/vin-validate";
 import { publishEvent } from "@/lib/realtime";
 import { cars as STATIC_CARS } from "@/data/cars";
@@ -107,7 +108,11 @@ const createSchema = z.object({
   bodyType: z.enum(["suv", "sedan", "hatchback", "pickup", "coupe", "wagon", "van"]),
   condition: z.enum(["new", "used", "certified", "foreign_used", "locally_used"]),
   location: z.string().min(1),
-  description: z.string().min(30),
+  // Delegated to lib/description-quality.ts so the seller gets the actual
+  // reason. A bare min(30) is what let "uhygby7gbygb y hgbyt67tg gy76ygt6tyg"
+  // (36 characters) publish. Only a confident rejection fails here; an
+  // uncertain description is accepted and held for review below.
+  description: descriptionSchema(),
   images: z.array(z.string()).default([]),
   features: z.array(z.string()).default([]),
   financingAvailable: z.boolean().default(false),
@@ -274,11 +279,18 @@ export async function POST(req: Request) {
   });
 
   try {
+    // The schema already refused a confidently bad description. What remains
+    // is the uncertain band, which must not publish unseen — previously every
+    // listing took the column default of 'active', so there was no review
+    // step at all on this path.
+    const description = assessDescription(data.description);
+
     const car = await createPublicCar({
       ...data,
       specifications: normalisedSpecs,
       sellerName: data.sellerName.trim() || session.user.name || "Private seller",
       sellerUserId: session.user.id,
+      status: description.verdict === "review" ? "pending_review" : "active",
     });
 
     // A buyer who publishes their first car becomes a private seller, so the

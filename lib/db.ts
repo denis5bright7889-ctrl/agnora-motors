@@ -628,7 +628,9 @@ export async function createPublicCar(
   data: Omit<
     DealerCar,
     "id" | "dealerId" | "slug" | "createdAt" | "updatedAt" | "views" | "inquiries" | "verified" | "status"
-  > & { sellerName: string; sellerPhone: string; sellerUserId: string },
+  > & {
+    /** Omit to publish as 'active'; pass 'pending_review' to hold for a moderator. */
+    status?: CarStatus; sellerName: string; sellerPhone: string; sellerUserId: string },
 ): Promise<DealerCar> {
   const base   = slugify(`${data.year}-${data.make}-${data.model}`);
   const suffix = Math.random().toString(36).slice(2, 7);
@@ -655,8 +657,8 @@ export async function createPublicCar(
         vin, vin_verified, service_history_available, ownership_verified, inspection_available,
         specifications,
         registration_number, mileage_verified, logbook_verified, accident_history,
-        seller_user_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34,$35,$36,$37,$38)
+        seller_user_id, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33::jsonb,$34,$35,$36,$37,$38,$39)
      RETURNING
        id, dealer_id AS "dealerId", slug, year, make, model, trim,
        price, mileage, fuel, transmission,
@@ -703,6 +705,10 @@ export async function createPublicCar(
       data.logbookVerified ?? false,
       data.accidentHistory ?? null,
       data.sellerUserId,
+      // Explicit, because the column default is 'active': a listing whose
+      // description could not be confidently judged must not go public
+      // unseen. Callers that pass nothing keep the previous behaviour.
+      data.status ?? "active",
     ],
   );
 

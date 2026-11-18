@@ -11,7 +11,18 @@ export type DealerStatus = "pending" | "approved" | "rejected";
 //   hidden   — admin temporarily took it down; owner can re-edit and resubmit
 //   rejected — admin rejected (policy violation, fraud); reason shown to owner
 //   archived — soft-deleted by admin or owner; reversible but invisible everywhere
-export type CarStatus = "active" | "sold" | "draft" | "hidden" | "rejected" | "archived";
+// "pending_review" is held back from public view until a moderator looks at
+// it. cars.status is an unconstrained TEXT column with DEFAULT 'active',
+// so adding a value needs no migration - only that every query which must
+// see it does not filter it out.
+export type CarStatus =
+  | "active" | "sold" | "draft" | "hidden" | "rejected" | "archived"
+  // Held back pending a moderator; set automatically on submission.
+  | "pending_review"
+  // Taken down by an administrator. Deliberately distinct from "hidden":
+  // a seller may hide their own listing, but only an admin suspends one,
+  // and conflating them makes the audit trail unreadable.
+  | "suspended";
 export type UserRole = "admin" | "dealer" | "private_seller" | "buyer";
 export type PlanId = "free" | "pro" | "premium";
 export type Drivetrain = "fwd" | "rwd" | "awd" | "4wd";
