@@ -8,6 +8,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { PwaRegister } from "@/components/pwa-register";
 import { WishlistProvider } from "@/lib/store";
 import { PageTransition } from "@/components/page-transition";
+import { CookieConsentProvider } from "@/components/cookie-consent/consent-context";
 import type { Metadata, Viewport } from "next";
 
 const inter = Inter({
@@ -80,14 +81,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <SessionProvider>
           <ThemeProvider attribute="class" defaultTheme="dark" enableSystem disableTransitionOnChange>
             <WishlistProvider>
-              <Navbar />
-              {/* pb-14 md:pb-0: reserve space for the 56-px mobile bottom nav */}
-              <main className="flex-1 pb-14 md:pb-0">
-                <PageTransition>{children}</PageTransition>
-              </main>
-              <Footer />
-              <BottomNav />
-              <PwaRegister />
+              {/* Wraps the tree so the footer's "Cookie preferences" control
+                  and the banner share one consent state. */}
+              <CookieConsentProvider>
+                <Navbar />
+                {/* pb-14 md:pb-0: reserve space for the 56-px mobile bottom nav */}
+                <main className="flex-1 pb-14 md:pb-0">
+                  <PageTransition>{children}</PageTransition>
+                </main>
+                <Footer />
+                <BottomNav />
+                <PwaRegister />
+              </CookieConsentProvider>
             </WishlistProvider>
           </ThemeProvider>
         </SessionProvider>

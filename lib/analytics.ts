@@ -32,7 +32,7 @@ export type AnalyticsEvent =
   // learning loop and the /admin/health correction-rate metric.
   | "vin_decode_corrected";
 
-const SESSION_KEY = "agnora_session_id";
+import { hasConsent, ANALYTICS_SESSION_KEY as SESSION_KEY } from "@/lib/consent";
 
 function getSessionId(): string | null {
   if (typeof window === "undefined") return null;
@@ -46,8 +46,22 @@ function getSessionId(): string | null {
   } catch { return null; }
 }
 
+/**
+ * Fires an analytics event — but only with the visitor's permission.
+ *
+ * The gate lives here rather than at the call sites because this is the one
+ * function every client-side event passes through: a new call site is
+ * covered automatically, and nobody has to remember to check.
+ *
+ * Events raised before consent are DROPPED, not queued. Queuing and flushing
+ * on acceptance would transmit behaviour recorded while the visitor had not
+ * agreed to be measured, which is the thing consent is supposed to prevent.
+ * Note that this also means no session identifier is minted: getSessionId()
+ * is never reached, so nothing is written to sessionStorage either.
+ */
 export function trackEvent(name: AnalyticsEvent, props: Record<string, unknown> = {}): void {
   if (typeof window === "undefined") return;
+  if (!hasConsent("analytics")) return;
   const body = JSON.stringify({
     name,
     props,

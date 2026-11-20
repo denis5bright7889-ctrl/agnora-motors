@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CookiePreferencesLink } from "@/components/cookie-consent/preferences-link";
 
 const columns = [
   {
@@ -47,7 +48,7 @@ export function Footer() {
       <div className="container max-w-container py-16">
         <div className="grid gap-10 md:grid-cols-12">
           <div className="md:col-span-4">
-            <Link href="/" className="flex items-center gap-2 font-display text-2xl tracking-tight">
+            <Link href="/" className="flex items-center gap-2 font-serif text-2xl tracking-tight">
               <span className="h-3 w-3 rounded-full bg-accent" aria-hidden />
               <span className="font-medium">Agnora<span className="text-accent">.</span></span>
             </Link>
@@ -91,10 +92,11 @@ export function Footer() {
 
         <div className="mt-12 flex flex-col gap-3 border-t border-border pt-6 text-xs text-muted md:flex-row md:items-center md:justify-between">
           <div className="font-medium tracking-widest uppercase">© 2026 Agnora Motors · All rights reserved</div>
-          <div className="flex gap-5">
+          <div className="flex flex-wrap gap-5">
             <Link href="#" className="hover:text-foreground">Privacy</Link>
             <Link href="#" className="hover:text-foreground">Terms</Link>
-            <Link href="#" className="hover:text-foreground">Cookies</Link>
+            <Link href="/cookies" className="hover:text-foreground">Cookie Policy</Link>
+            <CookiePreferencesLink className="hover:text-foreground" />
           </div>
         </div>
       </div>
