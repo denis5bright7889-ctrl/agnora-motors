@@ -16,17 +16,24 @@ import { cn } from "@/lib/utils";
 import { trackEvent } from "@/lib/analytics";
 import type { DecodedVehicle } from "@/lib/vin-decoder";
 import { descriptionSchema } from "@/lib/description-quality";
+import {
+  boundedNumber, optionalBoundedNumber, yearSchema, formatIfValid, isDisplayableNumber,
+} from "@/lib/vehicle-limits";
+import { modelSchema, trimSchema, colourSchema, makeSchema, assessVehicleName } from "@/lib/model-name";
 
 // ─── Schema (same fields, kept as a single form to preserve values across steps) ──
 const schema = z.object({
   sellerName:  z.string().min(2, "Your name is required"),
   sellerPhone: z.string().min(9, "A valid phone number is required"),
-  year:        z.coerce.number().min(1990).max(2026),
-  make:        z.string().min(1, "Make required"),
-  model:       z.string().min(1, "Model required"),
-  trim:        z.string().optional(),
-  price:       z.coerce.number().min(100_000, "Minimum price KSh 100,000"),
-  mileage:     z.coerce.number().min(0),
+  // Identical bounds to the server, imported from lib/vehicle-limits.ts so
+  // the two cannot drift. The server stays authoritative; this just means the
+  // seller is told before a round trip.
+  year:        yearSchema(),
+  make:        makeSchema(),
+  model:       modelSchema(),
+  trim:        trimSchema(),
+  price:       boundedNumber("priceKsh"),
+  mileage:     boundedNumber("mileageKm", { unit: "km" }),
   fuel:         z.enum(["petrol", "diesel", "hybrid", "electric"]),
   transmission: z.enum(["auto", "manual"]),
   bodyType:     z.enum(["suv", "sedan", "hatchback", "pickup", "coupe", "wagon", "van"]),
@@ -41,9 +48,9 @@ const schema = z.object({
   // Optional typed cols already in the cars table — exposed via Technical
   // specifications panel below.
   drivetrain:     z.enum(["fwd", "rwd", "awd", "4wd"]).optional().or(z.literal("")),
-  previousOwners: optionalNum(0, 20),
-  exteriorColor:  z.string().max(40).optional(),
-  interiorColor:  z.string().max(40).optional(),
+  previousOwners: optionalBoundedNumber("previousOwners"),
+  exteriorColor:  colourSchema("Exterior colour"),
+  interiorColor:  colourSchema("Interior colour"),
   financingAvailable:    z.boolean().default(false),
   hirePurchaseAvailable: z.boolean().default(false),
   // Optional buyer-decision specs — every field independently optional.
@@ -51,28 +58,24 @@ const schema = z.object({
   // Numbers are nullable-on-blank: react-hook-form gives "" for an empty
   // number input, so coerce to undefined before validation.
   specifications: z.object({
-    engineCc:           optionalNum(50, 20_000),
-    horsepower:         optionalNum(20, 2_500),
-    torqueNm:           optionalNum(20, 5_000),
-    fuelEconomyKmL:     optionalNum(1, 100, true),
-    batteryCapacityKwh: optionalNum(1, 500, true),
-    rangeKm:            optionalNum(20, 2_000),
-    chargingTimeHours:  optionalNum(0.1, 72, true),
-    seats:              optionalNum(1, 60),
-    payloadKg:          optionalNum(50, 50_000),
-    towingCapacityKg:   optionalNum(50, 50_000),
+    engineCc:           optionalBoundedNumber("engineCc", { unit: "cc" }),
+    horsepower:         optionalBoundedNumber("horsepower", { unit: "hp" }),
+    torqueNm:           optionalBoundedNumber("torqueNm", { unit: "Nm" }),
+    fuelEconomyKmL:     optionalBoundedNumber("fuelEconomyKmL", { unit: "km/L" }),
+    batteryCapacityKwh: optionalBoundedNumber("batteryCapacityKwh", { unit: "kWh" }),
+    rangeKm:            optionalBoundedNumber("rangeKm", { unit: "km" }),
+    chargingTimeHours:  optionalBoundedNumber("chargingTimeHours", { unit: "hours" }),
+    seats:              optionalBoundedNumber("seats"),
+    payloadKg:          optionalBoundedNumber("payloadKg", { unit: "kg" }),
+    towingCapacityKg:   optionalBoundedNumber("towingCapacityKg", { unit: "kg" }),
     upholstery:         z.enum(["cloth", "leather", "leatherette", "alcantara"]).optional().or(z.literal("")),
   }).default({}),
 });
 
-/** Number field that treats empty string as "not provided". */
-function optionalNum(min: number, max: number, allowFloat = false) {
-  const base = allowFloat ? z.number() : z.number().int();
-  return z.preprocess(
-    (v) => (v === "" || v == null) ? undefined : Number(v),
-    base.min(min).max(max).optional(),
-  );
-}
+// optionalNum() lived here. It is gone: it used Number() directly, so
+// Infinity survived coercion, and its bounds were written out by hand at
+// each call site — a second set of limits to drift from the server's.
+// optionalBoundedNumber() from lib/vehicle-limits.ts replaces it.
 
 type FormData = z.infer<typeof schema>;
 
@@ -84,8 +87,13 @@ const DRAFT_KEY  = "agnora:sell-new:images";
 // in these arrays simply isn't checked until the final submit (e.g. boolean
 // finance flags don't need validation).
 const STEP_FIELDS: Record<0 | 1 | 2, (keyof FormData)[]> = {
+  // "specifications", the colours and previousOwners were absent, so the
+  // optional Technical specifications panel was never validated until final
+  // submit — the seller could carry an impossible engine size through three
+  // steps and see it rendered in the preview the whole way.
   0: ["year", "make", "model", "trim", "condition", "mileage",
-      "fuel", "transmission", "bodyType", "vin", "description"],
+      "fuel", "transmission", "bodyType", "vin", "description",
+      "specifications", "previousOwners", "exteriorColor", "interiorColor"],
   1: ["price", "location"],
   2: ["sellerName", "sellerPhone"],
 };
@@ -163,6 +171,7 @@ export default function PublicListingPage() {
     register, control, trigger, handleSubmit, getValues, setValue,
     formState: { errors, isSubmitting, dirtyFields },
   } = useForm<FormData>({
+
     resolver: zodResolver(schema),
     // Keep values across step transitions even when fields are unmounted.
     shouldUnregister: false,
@@ -171,6 +180,19 @@ export default function PublicListingPage() {
       condition: "foreign_used", financingAvailable: false, hirePurchaseAvailable: false,
     },
   });
+
+  // Resolves a dotted field path against react-hook-form's nested error
+  // object. The Technical specifications fields, trim, previous owners and
+  // the colours were registered and VALIDATED but never rendered an error,
+  // so an invalid value blocked Continue while saying nothing at all.
+  const fieldError = (path: string): string | undefined => {
+    const node = path.split(".").reduce<unknown>(
+      (acc, key) => (acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined),
+      errors as unknown,
+    );
+    const msg = (node as { message?: unknown } | undefined)?.message;
+    return typeof msg === "string" ? msg : undefined;
+  };
 
   // Reactive snapshot of every field so the live preview re-renders as the
   // user types. Cheap because react-hook-form already tracks the values.
@@ -632,8 +654,8 @@ export default function PublicListingPage() {
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label="Trim / variant (optional)">
-                      <input {...register("trim")} placeholder="e.g. Hybrid Z" className={inputCls(false)} />
+                    <Field label="Trim / variant (optional)" error={fieldError("trim")}>
+                      <input {...register("trim")} placeholder="e.g. Hybrid Z" className={inputCls(!!fieldError("trim"))} />
                     </Field>
                     <Field label="Condition" error={errors.condition?.message}>
                       <select {...register("condition")} className={selectCls(!!errors.condition)}>
@@ -854,35 +876,37 @@ export default function PublicListingPage() {
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">Engine</p>
                         <div className="grid gap-4 sm:grid-cols-3">
                           {watched.fuel !== "electric" && (
-                            <Field label="Engine capacity (cc)">
+                            <Field label="Engine capacity (cc)" error={fieldError("specifications.engineCc")}>
                               <input
                                 {...register("specifications.engineCc")}
                                 type="number"
                                 placeholder="2000"
-                                className={inputCls(false)}
+                                className={inputCls(!!fieldError("specifications.engineCc"))}
                               />
                             </Field>
                           )}
                           <Field
                             label="Horsepower (hp)"
                             hint="Higher horsepower generally means quicker acceleration."
+                            error={fieldError("specifications.horsepower")}
                           >
                             <input
                               {...register("specifications.horsepower")}
                               type="number"
                               placeholder="170"
-                              className={inputCls(false)}
+                              className={inputCls(!!fieldError("specifications.horsepower"))}
                             />
                           </Field>
                           <Field
                             label="Torque (Nm)"
                             hint="Higher torque improves towing and low-speed pull."
+                            error={fieldError("specifications.torqueNm")}
                           >
                             <input
                               {...register("specifications.torqueNm")}
                               type="number"
                               placeholder="250"
-                              className={inputCls(false)}
+                              className={inputCls(!!fieldError("specifications.torqueNm"))}
                             />
                           </Field>
                         </div>
@@ -903,13 +927,14 @@ export default function PublicListingPage() {
                             <Field
                               label="Fuel economy (km/L)"
                               hint="Combined urban + highway is fine — round to one decimal."
-                            >
+                            error={fieldError("specifications.fuelEconomyKmL")}
+                          >
                               <input
                                 {...register("specifications.fuelEconomyKmL")}
                                 type="number"
                                 step="0.1"
                                 placeholder="14.2"
-                                className={inputCls(false)}
+                                className={inputCls(!!fieldError("specifications.fuelEconomyKmL"))}
                               />
                             </Field>
                           )}
@@ -923,31 +948,33 @@ export default function PublicListingPage() {
                             {watched.fuel === "electric" ? "Battery & range" : "Hybrid battery"}
                           </p>
                           <div className="grid gap-4 sm:grid-cols-3">
-                            <Field label="Battery capacity (kWh)">
+                            <Field label="Battery capacity (kWh)" error={fieldError("specifications.batteryCapacityKwh")}>
                               <input
                                 {...register("specifications.batteryCapacityKwh")}
                                 type="number"
                                 step="0.1"
                                 placeholder="75"
-                                className={inputCls(false)}
+                                className={inputCls(!!fieldError("specifications.batteryCapacityKwh"))}
                               />
                             </Field>
-                            <Field label={watched.fuel === "electric" ? "Range (km)" : "EV-only range (km)"}>
+                            <Field label={watched.fuel === "electric" ? "Range (km)" : "EV-only range (km)"}
+                            error={fieldError("specifications.rangeKm")}
+                          >
                               <input
                                 {...register("specifications.rangeKm")}
                                 type="number"
                                 placeholder="450"
-                                className={inputCls(false)}
+                                className={inputCls(!!fieldError("specifications.rangeKm"))}
                               />
                             </Field>
                             {watched.fuel === "electric" && (
-                              <Field label="Charging time (hrs, AC)">
+                              <Field label="Charging time (hrs, AC)" error={fieldError("specifications.chargingTimeHours")}>
                                 <input
                                   {...register("specifications.chargingTimeHours")}
                                   type="number"
                                   step="0.1"
                                   placeholder="8"
-                                  className={inputCls(false)}
+                                  className={inputCls(!!fieldError("specifications.chargingTimeHours"))}
                                 />
                               </Field>
                             )}
@@ -960,20 +987,20 @@ export default function PublicListingPage() {
                         <div>
                           <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">Load capacity</p>
                           <div className="grid gap-4 sm:grid-cols-2">
-                            <Field label="Payload (kg)">
+                            <Field label="Payload (kg)" error={fieldError("specifications.payloadKg")}>
                               <input
                                 {...register("specifications.payloadKg")}
                                 type="number"
                                 placeholder="1000"
-                                className={inputCls(false)}
+                                className={inputCls(!!fieldError("specifications.payloadKg"))}
                               />
                             </Field>
-                            <Field label="Towing capacity (kg)">
+                            <Field label="Towing capacity (kg)" error={fieldError("specifications.towingCapacityKg")}>
                               <input
                                 {...register("specifications.towingCapacityKg")}
                                 type="number"
                                 placeholder="3500"
-                                className={inputCls(false)}
+                                className={inputCls(!!fieldError("specifications.towingCapacityKg"))}
                               />
                             </Field>
                           </div>
@@ -984,36 +1011,36 @@ export default function PublicListingPage() {
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-widest text-muted mb-3">Interior & exterior</p>
                         <div className="grid gap-4 sm:grid-cols-3">
-                          <Field label="Seats">
+                          <Field label="Seats" error={fieldError("specifications.seats")}>
                             <input
                               {...register("specifications.seats")}
                               type="number"
                               placeholder="5"
-                              className={inputCls(false)}
+                              className={inputCls(!!fieldError("specifications.seats"))}
                             />
                           </Field>
-                          <Field label="Exterior colour">
+                          <Field label="Exterior colour" error={fieldError("exteriorColor")}>
                             <input
                               {...register("exteriorColor")}
                               type="text"
                               placeholder="Pearl White"
-                              className={inputCls(false)}
+                              className={inputCls(!!fieldError("exteriorColor"))}
                             />
                           </Field>
-                          <Field label="Interior colour">
+                          <Field label="Interior colour" error={fieldError("interiorColor")}>
                             <input
                               {...register("interiorColor")}
                               type="text"
                               placeholder="Black leather"
-                              className={inputCls(false)}
+                              className={inputCls(!!fieldError("interiorColor"))}
                             />
                           </Field>
                         </div>
                         <div className="grid gap-4 sm:grid-cols-2 mt-4">
-                          <Field label="Upholstery">
+                          <Field label="Upholstery" error={fieldError("specifications.upholstery")}>
                             <select
                               {...register("specifications.upholstery")}
-                              className={selectCls(false)}
+                              className={selectCls(!!fieldError("specifications.upholstery"))}
                             >
                               <option value="">Select material</option>
                               <option value="cloth">Cloth</option>
@@ -1022,12 +1049,12 @@ export default function PublicListingPage() {
                               <option value="alcantara">Alcantara</option>
                             </select>
                           </Field>
-                          <Field label="Previous owners">
+                          <Field label="Previous owners" error={fieldError("previousOwners")}>
                             <input
                               {...register("previousOwners")}
                               type="number"
                               placeholder="1"
-                              className={inputCls(false)}
+                              className={inputCls(!!fieldError("previousOwners"))}
                             />
                           </Field>
                         </div>
@@ -1413,17 +1440,49 @@ function LivePreview({
   const coverSrc = cover ? (cover.uploadedUrl ?? cover.previewUrl) : null;
   const uploadedTotal = images.filter((i) => i.status === "uploaded").length;
 
-  const heading = [values.year, values.make, values.model].filter(Boolean).join(" ") || "Your car";
-  const trim    = values.trim?.trim();
+  // Formatting is gated on the value being one we would actually publish.
+  //
+  // This block previously did `Number(values.mileage).toLocaleString()`
+  // unconditionally, so the nonsense "1e+18" was rendered as
+  // "1,000,000,000,000,000,000 km" — digit grouping and all. That is the
+  // specific failure the brief calls out: the preview took an absurd number
+  // and made it look like a specification. A value outside the publishable
+  // range is now shown as "—", exactly as a missing one is.
+  const yearValid = isDisplayableNumber(values.year) &&
+    Number(values.year) >= 1900 && Number(values.year) <= new Date().getUTCFullYear() + 1;
+
+  // Text is held to the same bar as numbers. Browser testing showed the
+  // heading rendering "2024 Toyota iuytfgh7 · 987t67ftcghj" — the field
+  // errors were right there in red, and the preview beside them still
+  // presented the mash as the vehicle's identity.
+  const modelOk = !!values.model && assessVehicleName(values.model, "Model").verdict === "ok";
+  const trimRaw = values.trim?.trim();
+  const trimOk  = !!trimRaw && assessVehicleName(trimRaw, "Trim").verdict === "ok";
+
+  const heading = [yearValid ? values.year : null, values.make, modelOk ? values.model : null]
+    .filter(Boolean).join(" ") || "Your car";
+  const trim    = trimOk ? trimRaw : undefined;
+
+  const mileageText = formatIfValid(values.mileage, "mileageKm", " km");
   const stats   = [
-    values.mileage  ? `${Number(values.mileage).toLocaleString()} km` : null,
+    mileageText,
     values.bodyType ? capitalize(values.bodyType) : null,
     values.transmission === "auto" ? "Automatic" : values.transmission === "manual" ? "Manual" : null,
     values.fuel ? capitalize(values.fuel) : null,
   ].filter(Boolean).join(" · ");
 
   const condition = values.condition ? CONDITION_LABEL[values.condition] : null;
-  const price     = values.price ? `Ksh ${Number(values.price).toLocaleString()}` : "Ksh —";
+  const priceText = formatIfValid(values.price, "priceKsh");
+  const price     = priceText ? `Ksh ${priceText}` : "Ksh —";
+
+  // Surfaced in the preview so the seller understands why a value vanished
+  // rather than assuming the preview is broken.
+  const suppressed = [
+    values.mileage != null && values.mileage !== ("" as unknown) && !mileageText ? "mileage" : null,
+    values.price   != null && values.price   !== ("" as unknown) && !priceText   ? "price"   : null,
+    values.model && !modelOk ? "model" : null,
+    trimRaw && !trimOk ? "trim" : null,
+  ].filter(Boolean) as string[];
 
   return (
     <div className="rounded-3xl border border-border bg-surface shadow-xl shadow-black/5 dark:shadow-black/30 overflow-hidden">
@@ -1448,6 +1507,18 @@ function LivePreview({
       </div>
 
       <div className="p-5 space-y-3">
+        {/* A value can disappear from the preview for only one reason: it is
+            not publishable. Saying so is better than leaving the seller to
+            wonder why the box they filled shows nothing. */}
+        {suppressed.length > 0 && (
+          <p
+            role="status"
+            className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700 dark:text-amber-400"
+          >
+            Not shown — outside the accepted range: {suppressed.join(", ")}. Buyers will not see
+            this listing until it is corrected.
+          </p>
+        )}
         <p className="font-display text-3xl font-medium tracking-tight leading-none">
           {price}
         </p>
@@ -1495,8 +1566,13 @@ function DecodedFactList({ fields }: { fields: DecodedVehicle }) {
   if (fields.fuel)         bits.push(capitalize(fields.fuel));
   if (fields.transmission) bits.push(fields.transmission === "auto" ? "Auto" : "Manual");
   if (fields.drivetrain)   bits.push(fields.drivetrain.toUpperCase());
-  if (fields.engineCc)     bits.push(`${fields.engineCc.toLocaleString()} cc`);
-  if (fields.horsepower)   bits.push(`${fields.horsepower} hp`);
+  // Decoder output is validated before it is shown, for the same reason
+  // seller input is: a decoder that returns a malformed number must not have
+  // it rendered as a fact about the car.
+  const cc = formatIfValid(fields.engineCc, "engineCc", " cc");
+  if (cc) bits.push(cc);
+  const hp = formatIfValid(fields.horsepower, "horsepower", " hp");
+  if (hp) bits.push(hp);
   if (bits.length === 0) return null;
   return <p className="text-xs text-muted mt-1 leading-relaxed">{bits.join(" · ")}</p>;
 }
