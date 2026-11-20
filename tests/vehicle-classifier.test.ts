@@ -46,10 +46,19 @@ test("a vehicle label with no score is reviewed, not accepted", () => {
   assert.equal(decidePhoto(result({ label: "vehicle", score: null })).action, "review");
 });
 
-test("with no classifier configured, uploads are unaffected", () => {
-  // 'unchecked' is distinct from 'uncertain': no classifier ran at all.
-  // Blocking here would break every upload the moment an env var is missing.
-  assert.equal(decidePhoto(result({ label: "unchecked", score: null })).action, "accept");
+test("with no classifier configured, uploads are REFUSED", () => {
+  // This test previously asserted "accept", with the reasoning that blocking
+  // would break every upload the moment an env var went missing. That
+  // reasoning was overturned by what actually happened: with no provider
+  // configured in any environment, every image was 'unchecked', so the gate
+  // stood permanently open and a gaussian-noise JPEG uploaded cleanly with
+  // review=false.
+  //
+  // 'unchecked' is still distinct from 'uncertain' — no classifier ran at
+  // all — but the absence of a check is not evidence that an image shows a
+  // vehicle. It now fails closed, and the caller gets a 503 telling them to
+  // retry rather than a silent pass.
+  assert.equal(decidePhoto(result({ label: "unchecked", score: null })).action, "unavailable");
 });
 
 test("rejection requires a higher bar than acceptance", () => {

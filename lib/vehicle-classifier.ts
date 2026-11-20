@@ -11,7 +11,12 @@
 // today — it never silently blocks a legitimate listing because ops forgot to
 // set an env var.
 
-export type ClassificationLabel = "unchecked" | "vehicle" | "not_vehicle" | "uncertain";
+export type ClassificationLabel =
+  | "unchecked"    // no provider configured — nobody looked
+  | "vehicle"
+  | "not_vehicle"
+  | "uncertain"    // the model looked and was not confident
+  | "unavailable"; // the provider errored, timed out, or answered unusably
 
 export interface ClassificationResult {
   label: ClassificationLabel;
@@ -156,15 +161,29 @@ export function resetVehicleClassifier(): void {
 }
 
 export type PhotoDecision =
-  | { action: "accept";  result: ClassificationResult }
-  | { action: "review";  result: ClassificationResult }
-  | { action: "reject";  result: ClassificationResult; message: string };
+  | { action: "accept";      result: ClassificationResult }
+  | { action: "review";      result: ClassificationResult }
+  | { action: "reject";      result: ClassificationResult; message: string }
+  | { action: "unavailable"; result: ClassificationResult; message: string };
 
 /**
  * Maps a classification onto what the upload pipeline should do.
+ *
  *   vehicle, confident      → accept
- *   not_vehicle, confident  → reject
- *   anything else           → accept the upload but flag it for review
+ *   not_vehicle, confident  → reject   (422)
+ *   unchecked / unavailable → UNAVAILABLE (503) — fail closed
+ *   uncertain               → review: uploaded, but held as 'pending' so it
+ *                             stays out of public view until a moderator
+ *                             agrees, and does not count toward publication
+ *
+ * FAIL-CLOSED, and why it had to change: "unchecked" used to return accept.
+ * With no provider configured every image is unchecked, so the gate was
+ * wide open — a 1024x768 gaussian-noise JPEG uploaded with review=false and
+ * could have counted toward the ten-photo publication requirement. An image
+ * nobody has classified is not evidence that it shows a vehicle, so it can no
+ * longer pass as one. Refusing is also honest to the seller: "try again
+ * shortly" is true, where silently accepting and later hiding the listing is
+ * not.
  */
 export function decidePhoto(result: ClassificationResult): PhotoDecision {
   if (result.label === "not_vehicle" && (result.score ?? 0) >= REJECT_THRESHOLD) {
@@ -177,20 +196,46 @@ export function decidePhoto(result: ClassificationResult): PhotoDecision {
   if (result.label === "vehicle" && (result.score ?? 0) >= ACCEPT_THRESHOLD) {
     return { action: "accept", result };
   }
-  if (result.label === "unchecked") return { action: "accept", result };
+  if (result.label === "unchecked" || result.label === "unavailable") {
+    return {
+      action: "unavailable",
+      result,
+      message:
+        "Photo verification is temporarily unavailable, so we can't accept uploads right now. "
+        + "Please try again shortly — your other listing details are saved.",
+    };
+  }
   return { action: "review", result };
 }
 
-/** Classification never blocks an upload by failing: a provider outage degrades to review. */
+/**
+ * Classifies an image, distinguishing "the model was unsure" from "we could
+ * not ask the model".
+ *
+ * This previously collapsed a provider outage into "uncertain", which routed
+ * to review and let the upload through. A timeout is not a weak opinion about
+ * the image — it is the absence of one, and the two must not share an outcome.
+ */
 export async function classifyVehicleImage(
   buffer: Buffer, mimeType: string,
 ): Promise<ClassificationResult> {
   const classifier = getVehicleClassifier();
   if (classifier.name === "none") return UNCHECKED;
   try {
-    return await classifier.classify({ buffer, mimeType });
+    const result = await classifier.classify({ buffer, mimeType });
+    // A provider that answers with something we don't understand has, in
+    // effect, not answered. Treat it as unavailable rather than guessing.
+    if (!result || !VALID_LABELS.has(result.label)) {
+      console.error("[classifier] %s returned an unusable result: %j", classifier.name, result);
+      return { label: "unavailable", score: null, provider: classifier.name };
+    }
+    return result;
   } catch (err) {
     console.error("[classifier] %s failed:", classifier.name, err instanceof Error ? err.message : err);
-    return { label: "uncertain", score: null, provider: classifier.name };
+    return { label: "unavailable", score: null, provider: classifier.name };
   }
 }
+
+const VALID_LABELS = new Set<ClassificationLabel>([
+  "unchecked", "vehicle", "not_vehicle", "uncertain", "unavailable",
+]);

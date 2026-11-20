@@ -111,6 +111,21 @@ export async function POST(req: Request) {
       );
     }
 
+    // Fail closed. Both branches return BEFORE the Cloudinary call below, so
+    // an unverifiable image never becomes an asset and never gets a
+    // classification row — no orphans, and nothing that could later be
+    // mistaken for a checked photo.
+    if (decision.action === "unavailable") {
+      console.error(
+        "[upload] refusing photo: classification unavailable (label=%s provider=%s)",
+        decision.result.label, decision.result.provider,
+      );
+      return NextResponse.json(
+        { error: decision.message, code: "classifier_unavailable" },
+        { status: 503, headers: { "Retry-After": "60" } },
+      );
+    }
+
     const base64 = `data:${detectedType};base64,${buffer.toString("base64")}`;
 
     const result = await new Promise<{ secure_url: string; public_id: string }>((resolve, reject) => {
