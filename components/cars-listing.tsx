@@ -750,12 +750,16 @@ function CarsListingInner({ initial }: Props) {
 
       <div className="py-6 lg:py-12">
         {/* Desktop advanced search bar */}
-        <div className="hidden lg:block mb-8 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-          <div className="flex flex-col gap-3 sm:flex-row">
+        {/* Controls sit on bg-background inside a bg-surface shell, so each
+            field reads as an input rather than blending into the panel the
+            way bg-surface-2 did. One height (h-11) and one radius
+            (rounded-xl) across every control in the row. */}
+        <div className="hidden lg:block mb-8 rounded-2xl border border-border bg-surface p-3 shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+          <div className="flex flex-col gap-2.5 sm:flex-row">
             <div className="relative sm:w-44">
               <select value={searchMake} onChange={(e) => setParam("smake", e.target.value || null)}
                 aria-label="Select make"
-                className="w-full h-11 appearance-none rounded-xl border border-border bg-surface-2 pl-4 pr-8 text-sm outline-none focus:border-accent cursor-pointer">
+                className="w-full h-11 appearance-none rounded-xl border border-border bg-background pl-3.5 pr-8 text-sm font-medium outline-none transition-colors hover:border-muted/40 focus:border-accent cursor-pointer">
                 <option value="">All makes</option>
                 {MAKES.map((m) => <option key={m} value={m}>{m}</option>)}
               </select>
@@ -764,7 +768,7 @@ function CarsListingInner({ initial }: Props) {
 
             <input value={localModel} onChange={(e) => setLocalModel(e.target.value)}
               placeholder="Model (e.g. Harrier, CX-5…)" aria-label="Model"
-              className="sm:w-44 h-11 rounded-xl border border-border bg-surface-2 px-4 text-sm outline-none focus:border-accent placeholder:text-muted" />
+              className="sm:w-44 h-11 rounded-xl border border-border bg-background px-3.5 text-sm outline-none transition-colors hover:border-muted/40 focus:border-accent placeholder:text-muted" />
 
             <div className="flex-1">
               <SearchAutocomplete
@@ -772,14 +776,14 @@ function CarsListingInner({ initial }: Props) {
                 onChange={setLocalQ}
                 placeholder="Search by keyword, year, trim, dealer name…"
                 source="cars-listing-desktop"
-                inputClassName="h-11 rounded-xl"
+                inputClassName="h-11 rounded-xl bg-background"
               />
             </div>
 
             <div className="relative sm:w-44">
               <select value={condition} onChange={(e) => setParam("condition", e.target.value || null)}
                 aria-label="Condition"
-                className="w-full h-11 appearance-none rounded-xl border border-border bg-surface-2 pl-4 pr-8 text-sm outline-none focus:border-accent cursor-pointer">
+                className="w-full h-11 appearance-none rounded-xl border border-border bg-background pl-3.5 pr-8 text-sm font-medium outline-none transition-colors hover:border-muted/40 focus:border-accent cursor-pointer">
                 {CONDITIONS.map(({ value, label }) => (
                   <option key={value} value={value === "all" ? "" : value}>{label}</option>
                 ))}
@@ -792,7 +796,7 @@ function CarsListingInner({ initial }: Props) {
         {/* Header */}
         <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="font-display text-3xl font-medium">Cars for sale</h1>
+            <h1 className="text-page-title">Cars for sale</h1>
             <p className="text-sm text-muted mt-1 flex items-center gap-2">
               {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-accent" aria-hidden /> : null}
               {total.toLocaleString()} {total === 1 ? "car" : "cars"} found
@@ -894,7 +898,7 @@ function CarsListingInner({ initial }: Props) {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 17H5a2 2 0 01-2-2V9a2 2 0 012-2h1l2-3h8l2 3h1a2 2 0 012 2v6a2 2 0 01-2 2h-3m-6 0h6m-3 0v0" />
                   </svg>
                 </div>
-                <h2 className="font-display text-2xl font-medium mb-2">No cars listed yet</h2>
+                <h2 className="text-section-title mb-2">No cars listed yet</h2>
                 <p className="text-muted mb-6 max-w-sm">Be the first. No account required — list your car in under four minutes and reach buyers across Kenya.</p>
                 <a href="/sell/new"
                   className="inline-flex h-11 items-center gap-2 rounded-full bg-accent text-white px-7 text-sm font-semibold hover:opacity-90 transition-opacity">
@@ -1068,7 +1072,7 @@ function EmptyFiltered({
         <path d="M60 60 L80 80" stroke="currentColor" strokeWidth="4" strokeLinecap="round" />
         <path d="M32 40h16M40 32v16" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
       </svg>
-      <h2 className="font-display text-xl font-medium mb-2">No exact matches found</h2>
+      <h2 className="text-section-title mb-2">No exact matches found</h2>
       <p className="text-sm text-muted mb-5 max-w-sm">
         Try removing a filter to broaden your search, or clear everything and start over.
       </p>

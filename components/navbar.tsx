@@ -14,7 +14,6 @@ import { useSession, signOut } from "next-auth/react";
 const STATIC_NAV_LINKS = [
   { href: "/cars",     label: "Buy" },
   { href: "/sell",     label: "Sell" },   // href overridden per-role below
-  { href: "/finance",  label: "Finance" },
   { href: "/research", label: "Research" },
 ];
 
@@ -63,13 +62,15 @@ export function Navbar() {
       <div className="container max-w-container flex h-16 items-center justify-between gap-3">
 
         {/* ── Logo ── */}
-        <Link href="/" className="flex items-center gap-2 font-display text-xl tracking-tight shrink-0">
+        {/* font-serif, not font-display: the wordmark keeps its serif
+            identity now that headings have moved to Inter. */}
+        <Link href="/" className="flex items-center gap-2 font-serif text-xl tracking-tight shrink-0">
           <span className="h-2.5 w-2.5 rounded-full bg-accent" aria-hidden />
           <span className="font-medium">Agnora<span className="text-accent">.</span></span>
         </Link>
 
         {/* ── Desktop nav ── */}
-        <nav className="hidden md:flex items-center gap-7 flex-1 justify-center" aria-label="Primary">
+        <nav className="hidden md:flex items-center gap-1 flex-1 justify-center" aria-label="Primary">
           {NAV_LINKS.map((l) => {
             const active =
               pathname === l.href ||
@@ -78,12 +79,25 @@ export function Navbar() {
               <Link
                 key={l.href}
                 href={l.href}
+                aria-current={active ? "page" : undefined}
                 className={cn(
-                  "text-sm transition-colors",
-                  active ? "text-foreground font-medium" : "text-muted hover:text-foreground",
+                  // One weight for every item, so the active state is carried
+                  // by colour and an underline rather than by the text
+                  // reflowing as its weight changes on navigation.
+                  "relative rounded-lg px-3 py-2 text-[15px] font-medium leading-none transition-colors",
+                  active
+                    ? "text-foreground"
+                    : "text-muted hover:text-foreground hover:bg-surface-2",
                 )}
               >
                 {l.label}
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute inset-x-3 -bottom-[1px] h-[2px] rounded-full bg-accent transition-opacity",
+                    active ? "opacity-100" : "opacity-0",
+                  )}
+                />
               </Link>
             );
           })}

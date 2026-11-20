@@ -35,9 +35,20 @@ export function CarCard({ car, priority, className }: Props) {
   }
 
   return (
-    <article className={cn("group relative hover-lift", className)}>
+    <article
+      className={cn(
+        // A contained card rather than loose elements on the page background:
+        // it gives every listing the same silhouette regardless of how long
+        // the title runs or whether the trust row renders.
+        "group relative flex h-full flex-col overflow-hidden rounded-2xl",
+        "border border-border bg-surface",
+        "transition-[box-shadow,transform,border-color] duration-200",
+        "hover:-translate-y-0.5 hover:border-border hover:shadow-[0_12px_32px_-18px_rgb(0_0_0/0.25)]",
+        className,
+      )}
+    >
       <Link href={`/cars/${car.slug}`} className="block focus-visible:outline-none" onClick={handleCardClick}>
-        <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-surface-2">
+        <div className="relative aspect-[4/3] overflow-hidden bg-surface-2">
           {/* Plain <img>: same defensive choice as the form / gallery so a
               missing remotePatterns entry can't break listing cards.
               `priority` becomes fetchpriority="high" for the LCP card. */}
@@ -47,21 +58,28 @@ export function CarCard({ car, priority, className }: Props) {
             alt={`${car.year} ${car.make} ${car.model}`}
             loading={priority ? "eager" : "lazy"}
             fetchPriority={priority ? "high" : "auto"}
-            className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+            className="absolute inset-0 h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
-          {car.verified && (
-            <div className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-900 backdrop-blur">
-              <Shield className="h-3 w-3" /> Verified
-            </div>
-          )}
-          <div className="absolute right-3 top-3 inline-flex items-center rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-900 backdrop-blur">
-            {CONDITION_LABELS[car.condition] ?? car.condition}
+
+          {/* Badges stack on the LEFT. The condition badge used to sit at
+              right-3 top-3 — exactly where the wishlist button sits — so the
+              heart covered it as soon as the card was hovered. */}
+          <div className="absolute left-3 top-3 flex flex-wrap items-center gap-1.5">
+            {car.verified && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/95 px-2 py-[3px] text-[10px] font-semibold uppercase tracking-wide text-neutral-900 shadow-sm backdrop-blur">
+                <Shield className="h-3 w-3" /> Verified
+              </span>
+            )}
+            <span className="inline-flex items-center rounded-full bg-neutral-900/80 px-2 py-[3px] text-[10px] font-semibold uppercase tracking-wide text-white shadow-sm backdrop-blur">
+              {CONDITION_LABELS[car.condition] ?? car.condition}
+            </span>
           </div>
+
           {(car.financingAvailable || car.hirePurchaseAvailable) && (
-            <div className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full bg-green-600/90 px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur">
+            <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 rounded-full bg-emerald-600/95 px-2 py-[3px] text-[10px] font-semibold text-white shadow-sm backdrop-blur">
               <Banknote className="h-3 w-3" />
               {car.hirePurchaseAvailable ? "Hire Purchase" : "Finance"}
-            </div>
+            </span>
           )}
         </div>
       </Link>
@@ -72,44 +90,52 @@ export function CarCard({ car, priority, className }: Props) {
         aria-label={saved ? "Remove from saved" : "Save car"}
         onClick={handleWishlist}
         className={cn(
-          "absolute right-3 top-3 flex h-9 w-9 items-center justify-center rounded-full backdrop-blur transition-all active:scale-90 z-10",
+          "absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full backdrop-blur transition-all active:scale-90",
           saved
             ? "bg-accent text-white shadow-lg shadow-accent/30"
-            : "bg-white/90 text-neutral-900 md:opacity-0 md:group-hover:opacity-100",
+            : "bg-white/90 text-neutral-900 shadow-sm md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100",
         )}
       >
         <Heart className={cn("h-4 w-4", saved && "fill-current")} />
       </button>
 
-      <div className="mt-4 space-y-3">
-        <div>
-          <h3 className="font-display text-lg font-medium leading-tight tracking-tight">
-            <Link href={`/cars/${car.slug}`} className="hover:text-accent transition-colors" onClick={handleCardClick}>
-              {car.year} {car.make} {car.model}
-            </Link>
-          </h3>
-        </div>
+      {/* flex-1 + mt-auto on the trust row keeps the bottom edge aligned
+          across a row of cards whose titles wrap to different heights. */}
+      <div className="flex flex-1 flex-col gap-2.5 p-4">
+        <h3 className="text-card-title">
+          <Link
+            href={`/cars/${car.slug}`}
+            className="line-clamp-1 transition-colors hover:text-accent"
+            onClick={handleCardClick}
+          >
+            {car.year} {car.make} {car.model}
+          </Link>
+        </h3>
 
-        <div className="flex items-baseline gap-1 flex-wrap">
+        <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
           <span className="text-xs font-semibold text-muted">KSh</span>
-          <span className="font-display text-2xl font-semibold tracking-tight text-accent">
-            {formatPrice(car.price)}
-          </span>
+          {/* Accent, not near-black as in the reference: the coral price is
+              one of Agnora's few distinctive marks and the brief asks for the
+              brand to survive the refinement. */}
+          <span className="text-price text-accent">{formatPrice(car.price)}</span>
           {car.priceTier && <PriceTierChip tier={car.priceTier} marketAvg={car.marketAvg} />}
         </div>
 
-        <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-muted">
+        <ul className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-meta text-muted">
           <li className="inline-flex items-center gap-1.5">
-            <Gauge className="h-3 w-3" /> {formatMileage(car.mileage)}
+            <Gauge className="h-3.5 w-3.5 shrink-0" /> {formatMileage(car.mileage)}
           </li>
+          <li aria-hidden className="h-3 w-px bg-border" />
           <li className="inline-flex items-center gap-1.5 capitalize">
-            <Fuel className="h-3 w-3" /> {car.fuel}
+            <Fuel className="h-3.5 w-3.5 shrink-0" /> {car.fuel}
           </li>
+          <li aria-hidden className="h-3 w-px bg-border" />
           <li className="inline-flex items-center gap-1.5 capitalize">
-            <Settings2 className="h-3 w-3" /> {car.transmission}
+            <Settings2 className="h-3.5 w-3.5 shrink-0" /> {car.transmission}
           </li>
-          <li className="inline-flex items-center gap-1.5">
-            <MapPin className="h-3 w-3" /> {car.location}
+          <li className="inline-flex min-w-0 items-center gap-1.5">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{car.location}</span>
           </li>
         </ul>
 
@@ -128,7 +154,7 @@ function DealerTrustRow({ dealer }: { dealer: Car["dealer"] }) {
   if (!showAny) return null;
 
   return (
-    <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-border/60 mt-1">
+    <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border/60 pt-2.5">
       {dealer.verified && (
         <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-600 dark:text-green-400">
           <Shield className="h-3 w-3" /> Verified

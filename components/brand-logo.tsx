@@ -32,7 +32,7 @@ export function BrandLogo({ brand, className }: Props) {
       <span
         aria-hidden
         className={cn(
-          "font-display text-3xl text-muted/40 group-hover:text-accent transition-colors",
+          "font-serif text-3xl text-muted/40 group-hover:text-accent transition-colors",
           className,
         )}
       >

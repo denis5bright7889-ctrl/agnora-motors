@@ -27,7 +27,24 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
-        display: ["var(--font-serif)", "Georgia", "serif"],
+        // Headings are Inter too, so the interface reads as ONE typographic
+        // system. `font-display` is kept as a token rather than removed
+        // because ~130 call sites use it: repointing it converts every
+        // heading at once, instead of editing thirty files and inevitably
+        // missing some.
+        display: ["var(--font-inter)", "system-ui", "sans-serif"],
+        // The serif survives for brand marks only — the Agnora wordmark and
+        // the lettered brand chip. That is identity, not interface.
+        serif: ["var(--font-serif)", "Georgia", "serif"],
+      },
+      fontSize: {
+        // Marketplace type scale. Sizes carry their own line-height so
+        // headings stop inheriting body leading.
+        "page-title":    ["1.875rem", { lineHeight: "2.25rem", letterSpacing: "-0.02em", fontWeight: "700" }],
+        "section-title": ["1.375rem", { lineHeight: "1.75rem", letterSpacing: "-0.015em", fontWeight: "600" }],
+        "card-title":    ["1.0625rem", { lineHeight: "1.4rem", letterSpacing: "-0.01em", fontWeight: "600" }],
+        "price":         ["1.375rem", { lineHeight: "1.65rem", letterSpacing: "-0.02em", fontWeight: "700" }],
+        "meta":          ["0.8125rem", { lineHeight: "1.125rem" }],
       },
       maxWidth: {
         container: "1280px",
