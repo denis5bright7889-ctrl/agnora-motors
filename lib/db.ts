@@ -3,7 +3,7 @@ import type { Car, CarStatus, Dealer, DealerCar, User, NewsArticle, ResearchArti
 import type { SearchFilters, SearchResponse, SearchFacets, FacetBucket } from "@/lib/search";
 import { expandAliases } from "@/lib/search-aliases";
 import { getCentroid } from "@/lib/locations";
-import { QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, MAX_VIN_LEN, normalizeVin } from "@/lib/quality-policy";
+import { QUALITY_POLICY_CUTOFF, MIN_PUBLISH_PHOTOS, MIN_VIN_LEN, MAX_VIN_LEN, normalizeVin, distinctPhotoCount, photoIdentity } from "@/lib/quality-policy";
 import { normalizeEmail } from "@/lib/email-normalize";
 
 // Use Pool (pg-compatible) so .query(text, params) works correctly.
@@ -529,7 +529,7 @@ export async function createDealerCar(
   const vin = normalizeVin(data.vin) || null;
   if (status === "active") {
     await assertActorActive("dealer", dealerId);
-    enforcePublishQuality(data.images, vin);
+    await enforcePublishQuality(data.images, vin);
   }
 
   const centroid = getCentroid(data.location);
@@ -602,10 +602,112 @@ export async function createDealerCar(
 // PR7: shared publish-quality guard for new listings. Drafts skip this.
 // Thresholds live in lib/quality-policy.ts so the same numbers govern insert,
 // update, search-time filtering, the audit query, and admin metrics.
-function enforcePublishQuality(images: string[] | undefined, vin: string | null | undefined): void {
-  const photoCount = images?.length ?? 0;
+/**
+ * Distinct photographs by CONTENT, falling back to URL identity.
+ *
+ * The URL-based count already collapses the same asset referenced several
+ * ways, but it cannot see that two different Cloudinary public ids hold the
+ * same bytes — upload the same file twice and you get two ids. The sha256 of
+ * every upload is already recorded in upload_classifications (indexed), so
+ * the content check costs one indexed query and no schema change.
+ *
+ * Safety rules, in order of importance:
+ *   - A URL with no recorded hash falls back to its URL identity. Hashes are
+ *     only written for images that passed the vehicle-photo path, so a
+ *     missing hash is normal, not suspicious.
+ *   - If the lookup fails for any reason, the URL-based count is returned.
+ *     That is exactly the guarantee that existed before this function, so a
+ *     database hiccup can never be LESS strict than the previous behaviour,
+ *     and can never block a legitimate publish either.
+ */
+export async function countDistinctPhotoContent(images: string[] | undefined): Promise<number> {
+  const urls = (images ?? []).map((u) => (u ?? "").trim()).filter(Boolean);
+  if (urls.length === 0) return 0;
+
+  const urlCount = distinctPhotoCount(urls);
+  if (!isDbConfigured()) return urlCount;
+
+  try {
+    const meta = await getUploadClassifications([...new Set(urls)]);
+    const seen = new Set<string>();
+    for (const url of urls) {
+      const record = meta.get(url);
+
+      // A photo the server itself recorded as NOT a vehicle, or as never
+      // classified, cannot satisfy the ten-photo requirement. Ten gaussian-
+      // noise images are ten distinct files, so content hashing alone would
+      // happily count them.
+      //
+      // A URL with NO record is still counted, for the same reason the
+      // ownership guard allows it: records exist only for images that went
+      // through the vehicle-photo path, so legacy listings legitimately have
+      // none and refusing them would break existing sellers. Closing that
+      // last gap needs a backfill — see the report.
+      if (record && (record.label === "not_vehicle" || record.label === "unchecked")) continue;
+
+      const sha = record?.sha256;
+      // Content identity when we have it, URL identity when we don't.
+      seen.add(sha ? `sha:${sha}` : `url:${photoIdentity(url)}`);
+    }
+    // Never weaker than the URL-only answer.
+    return Math.min(seen.size, urlCount);
+  } catch (err) {
+    console.warn(
+      "[publish-quality] content de-duplication unavailable, falling back to URL identity:",
+      err instanceof Error ? err.message : err,
+    );
+    return urlCount;
+  }
+}
+
+/**
+ * Refuses a listing that attaches photos uploaded by somebody else.
+ *
+ * Uploads are authenticated and the uploader is recorded
+ * (upload_classifications.user_id), but listing creation only ever read the
+ * classification BY URL — it never checked who put the file there. A seller
+ * could therefore paste another user's Cloudinary URL into their own listing
+ * and publish with photographs that were not theirs.
+ *
+ * The rule is deliberately narrow: an image is refused only when there IS a
+ * recorded uploader and it is someone else. A URL with no recorded uploader
+ * is allowed, because rows are only written for images that went through the
+ * vehicle-photo path — legacy listings and other folders legitimately have
+ * none, and refusing those would break existing sellers for no security gain.
+ * What it does close is the theft case, which is the one that matters.
+ */
+export async function assertImagesOwnedBy(
+  userId: string,
+  images: string[] | undefined,
+): Promise<void> {
+  const urls = [...new Set((images ?? []).map((u) => (u ?? "").trim()).filter(Boolean))];
+  if (urls.length === 0 || !isDbConfigured()) return;
+
+  const rows = await query<{ url: string; user_id: string | null }>(
+    `SELECT url, user_id FROM upload_classifications
+      WHERE url = ANY($1::text[]) AND user_id IS NOT NULL AND user_id <> $2`,
+    [urls, userId],
+  );
+  if (rows.length > 0) {
+    throw new ListingQualityError(
+      rows.length === 1
+        ? "One of these photos was uploaded by a different account. Upload your own photos of the vehicle."
+        : `${rows.length} of these photos were uploaded by a different account. Upload your own photos of the vehicle.`,
+    );
+  }
+}
+
+async function enforcePublishQuality(images: string[] | undefined, vin: string | null | undefined): Promise<void> {
+  // DISTINCT by content, not length: the same URL repeated ten times used to
+  // satisfy a ten-photo requirement, which a direct API call could do in one
+  // request, and the same FILE uploaded ten times did too.
+  const photoCount = await countDistinctPhotoContent(images);
   if (photoCount < MIN_PUBLISH_PHOTOS) {
-    throw new ListingQualityError(`Published listings require at least ${MIN_PUBLISH_PHOTOS} photos (${photoCount} supplied). Save as draft to finish later.`);
+    const supplied = images?.length ?? 0;
+    const note = supplied > photoCount
+      ? ` You uploaded ${supplied}, but only ${photoCount} ${photoCount === 1 ? "is a different image" : "are different images"}.`
+      : ` (${photoCount} supplied).`;
+    throw new ListingQualityError(`Published listings require at least ${MIN_PUBLISH_PHOTOS} photos.${note} Save as draft to finish later.`);
   }
   const vinLen = (vin ?? "").trim().length;
   if (vinLen < MIN_VIN_LEN || vinLen > MAX_VIN_LEN) {
@@ -669,7 +771,7 @@ export async function createPublicCar(
   const vin = normalizeVin(data.vin) || null;
 
   // PR7: same publish-quality bar for every private-seller listing.
-  enforcePublishQuality(data.images, vin);
+  await enforcePublishQuality(data.images, vin);
 
   const centroid = getCentroid(data.location);
   // JSONB column expects a string; PG node driver does the parse on the way back.
@@ -1182,7 +1284,7 @@ export async function updateDealerCar(
         await assertActorActive("dealer", dealerId);
         const finalImages = data.images ?? current.images ?? [];
         const finalVin    = data.vin    ?? current.vin    ?? null;
-        enforcePublishQuality(finalImages, finalVin);
+        await enforcePublishQuality(finalImages, finalVin);
       }
     }
   }

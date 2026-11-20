@@ -6,9 +6,11 @@ import {
   getDealerCars,
   deleteDealerCar,
   ListingQualityError,
+  assertImagesOwnedBy,
 } from "@/lib/db";
 import { publishEvent } from "@/lib/realtime";
 import { assessDescription, describeDescriptionProblem } from "@/lib/description-quality";
+import { vehicleFieldsSchema, describeFieldIssues } from "@/lib/listing-fields";
 import type { CarStatus } from "@/types";
 
 export const runtime = "nodejs";
@@ -58,13 +60,41 @@ export async function POST(req: Request) {
       );
     }
 
+    // Every vehicle field is validated here, against the same bounds the
+    // public /api/cars path uses. Before this, the body was spread straight
+    // into createDealerCar, so this endpoint accepted any number and any
+    // text a caller cared to send — including values the browser form would
+    // never have produced.
+    const fields = vehicleFieldsSchema.safeParse(body);
+    if (!fields.success) {
+      const { error, fields: bad } = describeFieldIssues(fields.error);
+      return NextResponse.json(
+        { error, code: "invalid_vehicle_fields", fields: bad },
+        { status: 400 },
+      );
+    }
+
     const requestedStatus: CarStatus = body?.status ?? "active";
     const status: CarStatus =
       description.verdict === "review" && requestedStatus === "active"
         ? "pending_review"
         : requestedStatus;
 
-    const car = await createDealerCar(dealer.id, { ...body, status });
+    // ONLY validated data reaches the insert. This used to spread `...body`,
+    // which meant any key the caller invented travelled straight into
+    // createDealerCar untouched — including the seller-declared trust flags,
+    // which are written to columns that render as green "verified" badges on
+    // the buyer-facing listing page. Every one of those is now named and
+    // type-checked by vehicleFieldsSchema.
+    // `verified` is required by the DealerCar type but is NOT one of the
+    // columns createDealerCar inserts, so it has never had any effect from
+    // this path. Passing false explicitly makes that visible, and means a
+    // caller sending `verified: true` cannot even appear to set it.
+    // Same ownership rule as the private-seller path: a dealer cannot
+    // attach photographs uploaded by another account.
+    await assertImagesOwnedBy(session.user.id, fields.data.images);
+
+    const car = await createDealerCar(dealer.id, { ...fields.data, status, verified: false });
     publishEvent("listing_created", {
       carId: car.id, make: car.make, model: car.model,
       year: car.year, price: car.price, dealerId: dealer.id,

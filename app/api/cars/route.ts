@@ -2,12 +2,14 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import {
-  createPublicCar, getCarsByIds, getPublicCars, isDbConfigured,
+  createPublicCar, getCarsByIds, getPublicCars, isDbConfigured, assertImagesOwnedBy,
   ListingQualityError, updateUserRole, setSellerTypeIfUnset,
 } from "@/lib/db";
 import { normalizeVin } from "@/lib/quality-policy";
 import { assessDescription, descriptionSchema } from "@/lib/description-quality";
 import { validateIdentifier } from "@/lib/vin-validate";
+import { boundedNumber, optionalBoundedNumber, yearSchema } from "@/lib/vehicle-limits";
+import { modelSchema, trimSchema, colourSchema, makeSchema } from "@/lib/model-name";
 import { publishEvent } from "@/lib/realtime";
 import { cars as STATIC_CARS } from "@/data/cars";
 import type { Car, Specifications } from "@/types";
@@ -97,12 +99,17 @@ export async function GET(req: Request) {
 const createSchema = z.object({
   sellerName: z.string().min(2).max(120),
   sellerPhone: z.string().min(9).max(20),
-  year: z.coerce.number().min(1990).max(2026),
-  make: z.string().min(1),
-  model: z.string().min(1),
-  trim: z.string().optional(),
-  price: z.coerce.number().min(100_000),
-  mileage: z.coerce.number().min(0),
+  // Bounds come from lib/vehicle-limits.ts so the browser and this route
+  // cannot disagree. `mileage` previously had NO upper bound on either side,
+  // which is how "1e+18" passed validation and died at the database instead:
+  // cars.mileage is a Postgres INTEGER, so the driver raised a numeric
+  // overflow and the seller saw a 500 rather than a reason.
+  year: yearSchema(),
+  make: makeSchema(),
+  model: modelSchema(),
+  trim: trimSchema(),
+  price: boundedNumber("priceKsh"),
+  mileage: boundedNumber("mileageKm", { unit: "km" }),
   fuel: z.enum(["petrol", "diesel", "hybrid", "electric"]),
   transmission: z.enum(["auto", "manual"]),
   bodyType: z.enum(["suv", "sedan", "hatchback", "pickup", "coupe", "wagon", "van"]),
@@ -119,10 +126,10 @@ const createSchema = z.object({
   hirePurchaseAvailable: z.boolean().default(false),
   // PR4b
   drivetrain:     z.enum(["fwd","rwd","awd","4wd"]).optional(),
-  engineSizeL:    z.coerce.number().min(0.5).max(8.0).optional(),
-  previousOwners: z.coerce.number().int().min(0).max(20).optional(),
-  exteriorColor:  z.string().max(40).optional(),
-  interiorColor:  z.string().max(40).optional(),
+  engineSizeL:    optionalBoundedNumber("engineSizeL", { unit: "litres" }),
+  previousOwners: optionalBoundedNumber("previousOwners"),
+  exteriorColor:  colourSchema("Exterior colour"),
+  interiorColor:  colourSchema("Interior colour"),
   // PR6b — normalised before the length check so a VIN typed with dashes or
   // spaces is judged on its real content, and so the stored value doesn't
   // depend on whether it was typed on a phone keyboard or pasted on a desktop.
@@ -158,26 +165,26 @@ const createSchema = z.object({
   // independently optional + range-clamped here, so the JSONB can never
   // grow weird strings or out-of-range numbers from a malformed client.
   specifications: z.object({
-    engineCc:           z.coerce.number().int().min(50).max(20_000).optional(),
-    horsepower:         z.coerce.number().int().min(20).max(2_500).optional(),
-    torqueNm:           z.coerce.number().int().min(20).max(5_000).optional(),
+    engineCc:           optionalBoundedNumber("engineCc", { unit: "cc" }),
+    horsepower:         optionalBoundedNumber("horsepower", { unit: "hp" }),
+    torqueNm:           optionalBoundedNumber("torqueNm", { unit: "Nm" }),
     // Pre-lowercase so external clients sending "AWD" / "4WD" still parse;
     // normalizeSpecifications() runs after this for the rest of the cleanup.
     drivetrain:         z.preprocess(
       (v) => typeof v === "string" ? v.toLowerCase() : v,
       z.enum(["fwd","rwd","awd","4wd"]).optional(),
     ),
-    fuelEconomyKmL:     z.coerce.number().min(1).max(100).optional(),
-    batteryCapacityKwh: z.coerce.number().min(1).max(500).optional(),
-    rangeKm:            z.coerce.number().int().min(20).max(2_000).optional(),
-    chargingTimeHours:  z.coerce.number().min(0.1).max(72).optional(),
-    seats:              z.coerce.number().int().min(1).max(60).optional(),
-    payloadKg:          z.coerce.number().int().min(50).max(50_000).optional(),
-    towingCapacityKg:   z.coerce.number().int().min(50).max(50_000).optional(),
-    exteriorColor:      z.string().max(40).optional(),
-    interiorColor:      z.string().max(40).optional(),
+    fuelEconomyKmL:     optionalBoundedNumber("fuelEconomyKmL", { unit: "km/L" }),
+    batteryCapacityKwh: optionalBoundedNumber("batteryCapacityKwh", { unit: "kWh" }),
+    rangeKm:            optionalBoundedNumber("rangeKm", { unit: "km" }),
+    chargingTimeHours:  optionalBoundedNumber("chargingTimeHours", { unit: "hours" }),
+    seats:              optionalBoundedNumber("seats"),
+    payloadKg:          optionalBoundedNumber("payloadKg", { unit: "kg" }),
+    towingCapacityKg:   optionalBoundedNumber("towingCapacityKg", { unit: "kg" }),
+    exteriorColor:      colourSchema("Exterior colour"),
+    interiorColor:      colourSchema("Interior colour"),
     upholstery:         z.enum(["cloth","leather","leatherette","alcantara"]).optional(),
-    previousOwners:     z.coerce.number().int().min(0).max(20).optional(),
+    previousOwners:     optionalBoundedNumber("previousOwners"),
   }).optional(),
 });
 
@@ -284,6 +291,11 @@ export async function POST(req: Request) {
     // listing took the column default of 'active', so there was no review
     // step at all on this path.
     const description = assessDescription(data.description);
+
+    // Photos must belong to the account publishing them. Listing creation
+    // previously read the upload record by URL without ever checking who
+    // uploaded it, so another user's photos could be attached.
+    await assertImagesOwnedBy(session.user.id, data.images);
 
     const car = await createPublicCar({
       ...data,
