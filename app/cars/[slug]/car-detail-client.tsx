@@ -5,8 +5,11 @@ import { useState, useRef, useEffect } from "react";
 import { trackEvent } from "@/lib/analytics";
 import {
   ChevronLeft, Shield, Star, Phone, MessageCircle, Check, AlertTriangle,
-  X, Fuel, Settings, MapPin, Calendar, Gauge, ChevronRight, Heart
+  X, Fuel, Settings, MapPin, Calendar, Gauge, ChevronRight, Heart, Info
 } from "lucide-react";
+import {
+  buildVehicleClaims, provenanceClass, PROVENANCE_LABEL, isIndependentlyVerified,
+} from "@/lib/claim-provenance";
 import { formatPrice, formatMileage, formatDate, cn } from "@/lib/utils";
 import { AiChatWidget } from "@/components/ai-chat-widget";
 import { TrustActions } from "@/components/cars/trust-actions";
@@ -449,7 +452,16 @@ export function CarDetail({ car, similar, dealerSlug, dealerTrust }: {
               {/* Trust badges */}
               <div className="rounded-2xl bg-surface-2 p-4 space-y-2.5">
                 {[
-                  { icon: Shield, text: "Verified dealer & listing" },
+                  // "Verified dealer & listing" used to sit here
+                  // unconditionally — every listing claimed verification
+                  // whether or not anything had been verified, which is the
+                  // same problem as the seller-ticked badges but without even
+                  // a checkbox behind it. It now appears only when the
+                  // listing actually carries the verified flag, which no
+                  // client-facing write path can set.
+                  ...(isIndependentlyVerified(car!)
+                    ? [{ icon: Shield, text: "Verified by Agnora" }]
+                    : []),
                   { icon: Check, text: "No registration fees" },
                   { icon: MessageCircle, text: "Direct contact, no middleman" },
                 ].map(({ icon: Icon, text }) => (
@@ -632,7 +644,8 @@ function SpecsTable({
       title: "Ownership",
       rows: [
         ["Previous owners", car.previousOwners != null ? String(car.previousOwners) : undefined],
-        ["VIN verified",    car.vinVerified ? "Yes" : undefined],
+        // Phrased as the seller's statement: nothing checks this.
+        ["VIN", car.vinVerified ? "Seller states it matches" : undefined],
       ],
     },
   ];
@@ -806,34 +819,53 @@ function TrustBadges({ car }: { car: CarType }) {
       ? { label: "Major repaired", icon: AlertTriangle,  tone: "neutral"  }
       : null; // "unknown" / undefined → no badge (don't mislead with absence)
 
-  const baseBadges = [
-    { active: !!car.verified,                label: "Verified dealer",  icon: Shield, tone: "positive" },
-    { active: !!car.vinVerified,             label: "VIN verified",     icon: Check,  tone: "positive" },
-    { active: !!car.mileageVerified,         label: "Mileage verified", icon: Check,  tone: "positive" },
-    { active: !!car.logbookVerified,         label: "Logbook verified", icon: Check,  tone: "positive" },
-    { active: !!car.inspectionAvailable,     label: "Inspection ready", icon: Check,  tone: "positive" },
-    { active: !!car.serviceHistoryAvailable, label: "Service history",  icon: Check,  tone: "positive" },
-    { active: !!car.ownershipVerified,       label: "Ownership OK",     icon: Check,  tone: "positive" },
-  ].filter((b) => b.active);
+  // Claims are built with their provenance attached, so a seller's ticked
+  // checkbox can no longer be rendered the same way as something Agnora
+  // actually established. See lib/claim-provenance.ts for what each flag is
+  // worth and why.
+  const claims = buildVehicleClaims(car);
 
-  const badges = accidentBadge ? [...baseBadges, { active: true, ...accidentBadge }] : baseBadges;
-  if (badges.length === 0) return null;
+  const accidentChip = accidentBadge
+    ? {
+        key: "accident",
+        label: `Seller states: ${accidentBadge.label.toLowerCase()}`,
+        provenance: "seller" as const,
+        detail: "Accident history as described by the seller. Agnora has not checked this.",
+        icon: accidentBadge.icon,
+      }
+    : null;
 
-  const toneClass = (tone: string) => tone === "positive"
-    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-    : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300";
+  const chips = [
+    ...claims.map((c) => ({
+      ...c,
+      icon: c.provenance === "verified" ? Shield : c.provenance === "decoded" ? Check : Info,
+    })),
+    ...(accidentChip ? [accidentChip] : []),
+  ];
+  if (chips.length === 0) return null;
+
+  const hasSellerClaim = chips.some((c) => c.provenance === "seller");
 
   return (
-    <div className="mt-2 flex flex-wrap gap-1.5">
-      {badges.map(({ label, icon: Icon, tone }) => (
-        <span
-          key={label}
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${toneClass(tone)}`}
-        >
-          <Icon className="h-3 w-3" />
-          {label}
-        </span>
-      ))}
+    <div className="mt-2 space-y-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map(({ key, label, provenance, detail, icon: Icon }) => (
+          <span
+            key={key}
+            title={`${PROVENANCE_LABEL[provenance]} — ${detail}`}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${provenanceClass(provenance)}`}
+          >
+            <Icon className="h-3 w-3" />
+            {label}
+          </span>
+        ))}
+      </div>
+      {hasSellerClaim && (
+        <p className="text-[10px] leading-relaxed text-muted">
+          Items marked “Seller states” are the seller’s own description and have not been
+          independently checked by Agnora.
+        </p>
+      )}
     </div>
   );
 }

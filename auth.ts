@@ -2,7 +2,7 @@ import NextAuth, { type DefaultSession, CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
-import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual, createHash } from "node:crypto";
 import { z } from "zod";
 import {
   getUserWithHash, createUser, getUserByEmail, markUserEmailVerified, isDbConfigured,
@@ -44,6 +44,24 @@ function getEnvAdmin() {
 // The .code field is what surfaces in the URL/error returned to the client.
 
 class GoogleAccountError extends CredentialsSignin   { code = "use_google"; }
+
+/**
+ * A non-identifying tag for an email address, for logs.
+ *
+ * Authentication logs used to carry the address itself. On a hosted platform
+ * those lines are retained and searchable, so an operations log doubled as a
+ * list of who holds an account — the same class of problem as logging a
+ * one-time code. This keeps what logs are actually for (correlating the lines
+ * of one failed sign-in) and drops what they should never have held.
+ *
+ * Not reversible to an address, but STABLE for the same address, so two
+ * entries for one user can still be tied together.
+ */
+function emailTag(email: string | null | undefined): string {
+  if (!email) return "anon";
+  return "u#" + createHash("sha256").update(String(email).trim().toLowerCase()).digest("hex").slice(0, 10);
+}
+
 class EmailNotVerifiedError extends CredentialsSignin { code = "email_not_verified"; }
 class AccountInactiveError extends CredentialsSignin  { code = "account_inactive"; }
 class RateLimitedError extends CredentialsSignin      { code = "rate_limited"; }
@@ -181,7 +199,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // Re-throw our typed errors so NextAuth surfaces them to the client
           // with their code. Anything else gets logged + opaque error.
           if (err instanceof CredentialsSignin) throw err;
-          console.error("[authorize] db lookup failed for %s:", email, err instanceof Error ? err.message : err);
+          console.error("[authorize] db lookup failed for %s:", emailTag(email), err instanceof Error ? err.message : err);
           throw new InvalidCredentialsError();
         }
       },
@@ -190,10 +208,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
   callbacks: {
     signIn({ user, account }) {
-      console.log("[signIn] provider=%s email=%s id=%s",
+      console.log("[signIn] provider=%s user=%s id=%s",
         account?.provider ?? "credentials",
-        user?.email       ?? "unknown",
-        user?.id          ?? "unknown",
+        emailTag(user?.email),
+        user?.id ?? "unknown",
       );
       return true;
     },
@@ -251,7 +269,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           // Never throw — would redirect to /login?error=Callback.
           console.error(
             "[jwt] google upsert FAILED for %s — using Google sub as id. Error: %s",
-            normalizedEmail,
+            emailTag(normalizedEmail),
             err instanceof Error ? err.message : String(err),
           );
           if (!token.id)   token.id   = token.sub;
