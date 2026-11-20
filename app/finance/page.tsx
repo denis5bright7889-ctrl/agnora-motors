@@ -2,13 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import {
   Calculator, Building2, Users, ChevronRight, CheckCircle2,
   TrendingDown, Phone, ArrowRight, Banknote, Car,
 } from "lucide-react";
 import { cn, formatPrice } from "@/lib/utils";
 
+// DISABLED — the finance page is withdrawn from the site.
+//
+// The route returns 404 and nothing links to it: the navbar, bottom nav,
+// homepage quick-action tile, homepage finance CTA band and the sitemap entry
+// were all removed. The page body below is left intact and unmodified, so the
+// page can be restored by deleting this call and the import above.
 export default function FinancePage() {
+  notFound();
+
   return (
     <div className="min-h-screen">
       {/* Hero */}

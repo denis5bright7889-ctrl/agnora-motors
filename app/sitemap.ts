@@ -10,7 +10,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${BASE_URL}/cars`,     lastModified: new Date(), changeFrequency: "hourly",  priority: 0.9 },
     { url: `${BASE_URL}/news`,     lastModified: new Date(), changeFrequency: "hourly",  priority: 0.8 },
     { url: `${BASE_URL}/research`, lastModified: new Date(), changeFrequency: "daily",   priority: 0.8 },
-    { url: `${BASE_URL}/finance`,  lastModified: new Date(), changeFrequency: "weekly",  priority: 0.6 },
     { url: `${BASE_URL}/sell`,     lastModified: new Date(), changeFrequency: "monthly", priority: 0.5 },
   ];
 

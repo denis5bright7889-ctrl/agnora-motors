@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Home, Car, PlusCircle, BookOpen, Banknote } from "lucide-react";
+import { Home, Car, PlusCircle, BookOpen } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { motion } from "framer-motion";
@@ -19,7 +19,6 @@ const BASE_ITEMS: NavItem[] = [
   { href: "/",         icon: Home,      label: "Home" },
   { href: "/cars",     icon: Car,       label: "Buy" },
   { href: "/sell",     icon: PlusCircle, label: "Sell", accent: true },
-  { href: "/finance",  icon: Banknote,  label: "Finance" },
   { href: "/research", icon: BookOpen,  label: "Research" },
 ];
 
@@ -46,7 +45,13 @@ export function BottomNav() {
       aria-label="Mobile navigation"
       className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-background/95 backdrop-blur-md"
     >
-      <div className="grid grid-cols-5 pb-safe">
+      {/* Columns derive from the item count. It used to be a hardcoded
+          grid-cols-5, which left an empty column the moment an item was
+          removed. */}
+      <div
+        className="grid pb-safe"
+        style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+      >
         {items.map(({ href, icon: Icon, label, accent }) => {
           const active =
             pathname === href ||

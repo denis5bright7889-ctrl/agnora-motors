@@ -1,9 +1,9 @@
 import Link from "next/link";
 import {
   Car, CarFront, CarTaxiFront, Truck, Caravan, Zap,
-  ArrowRight, Banknote, Shield, Tag,
+  ArrowRight, Shield, Tag,
   MessageCircle, Globe, BookOpen, PlusCircle,
-  Check, TrendingUp,
+  Check,
 } from "lucide-react";
 import { HeroSearch } from "@/components/sections/hero-search";
 import { BrandLogo } from "@/components/brand-logo";
@@ -35,13 +35,6 @@ const QUICK_ACTIONS = [
     href:     "/sell",
     icon:     PlusCircle,
     accent:   "bg-foreground text-background",
-  },
-  {
-    label:    "Finance",
-    sub:      "Calculate payments",
-    href:     "/finance",
-    icon:     Banknote,
-    accent:   "bg-blue-600 text-white",
   },
   {
     label:    "Research",
@@ -135,7 +128,7 @@ export default function HomePage() {
       {/* ══ Quick actions ═════════════════════════════════════ */}
       <section className="py-10 lg:py-14">
         <div className="container max-w-container">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {QUICK_ACTIONS.map(({ label, sub, href, icon: Icon, accent }) => (
               <Link
                 key={href}
@@ -269,40 +262,6 @@ export default function HomePage() {
                 className="inline-flex h-11 items-center gap-2 rounded-full border border-border px-6 text-sm font-medium hover:bg-surface-2 transition-colors"
               >
                 Start listing <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ══ Finance CTA band ══════════════════════════════════ */}
-      <section className="py-14 lg:py-20 bg-surface">
-        <div className="container max-w-container">
-          <div className="rounded-3xl bg-accent px-8 py-10 lg:px-14 lg:py-16 text-white flex flex-col lg:flex-row lg:items-center lg:justify-between gap-8">
-            <div className="space-y-3">
-              <div className="inline-flex items-center gap-2 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold uppercase tracking-wider">
-                <TrendingUp className="h-3.5 w-3.5" /> Finance available
-              </div>
-              <h2 className="font-display text-3xl lg:text-4xl font-medium leading-tight">
-                Drive away today,<br />pay over time.
-              </h2>
-              <p className="text-white/80 text-sm leading-relaxed max-w-md">
-                Flexible hire-purchase and bank financing options on thousands of listed cars.
-                Calculate your monthly payments instantly.
-              </p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3 shrink-0">
-              <Link
-                href="/finance"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full bg-white text-accent px-7 text-sm font-semibold hover:bg-white/90 transition-colors"
-              >
-                Calculate payments <ArrowRight className="h-4 w-4" />
-              </Link>
-              <Link
-                href="/cars?financing=1"
-                className="inline-flex h-12 items-center justify-center gap-2 rounded-full border border-white/30 px-7 text-sm font-medium text-white hover:bg-white/10 transition-colors"
-              >
-                Browse finance cars
               </Link>
             </div>
           </div>
